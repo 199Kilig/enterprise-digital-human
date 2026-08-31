@@ -1,0 +1,27 @@
+# 环境与密钥（安全红线：任何情况下不进库）
+.env
+.env.*
+!.env.example
+
+# 文档生成物（测试报告/覆盖率等自动产物）
+docs/_generated/
+
+# 文档暂存区（agent 临时快照/草稿，蒸馏后清空，不进库）
+docs/_inbox/
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Node
+node_modules/
+
+# IDE / 工具
+.vscode/
+.idea/
+
+# 系统
+.DS_Store
+Thumbs.db

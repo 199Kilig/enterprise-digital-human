@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: enterprise-digital-human
+Version: 0.1.0
+Summary: 企业级实时交互数字人助手（backend）：听→想→说→演 自研编排
+Requires-Python: >=3.11
+Requires-Dist: fastapi>=0.110
+Requires-Dist: uvicorn>=0.29
+Requires-Dist: pydantic>=2.6
+Requires-Dist: numpy>=1.26
+Requires-Dist: scipy>=1.12

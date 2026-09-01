@@ -1,0 +1,38 @@
+# 配置中心（DESIGN §4.4）：模型供应商/参数集中管理
+# api_key 一律从环境变量读取（api_key_env 字段指定），不落盘
+
+asr:
+  provider: modelscope            # 模型下载源（国内优先，DESIGN §5.4 坑 2）
+  model: paraformer-zh-streaming  # 流式模型（离线版为 paraformer-zh）
+  vad_model: fsmn-vad
+  streaming: true
+  chunk_size: [5, 10, 5]
+  chunk_stride: 600
+
+llm:
+  provider: deepseek
+  model: deepseek-chat
+  base_url: https://api.deepseek.com
+  api_key_env: DEEPSEEK_API_KEY   # 从该环境变量读取 key
+  fallback_model: null            # 本地兜底模型（P2 可选）
+
+tts:
+  provider: dashscope             # 云端优先（支持 word 时间戳）；开源 CosyVoice2 为备用路线
+  model: cosyvoice-v1
+  timestamp: true                 # word-level 时间戳开关（V-02 验证后定）
+  first_packet_target_ms: 300     # 首包目标延迟
+  output_sample_rate: 16000       # 链路统一基准；TTS 输出非 16k 由 tts 模块重采样（SPEC §2）
+
+lip:
+  model: musetalk
+  fps: 25                         # 与 MuseTalk 训练口径一致
+  batch_size: 4
+  service_url: http://localhost:8002  # 云 GPU lip 推理服务（SPEC §2.1）
+  mock: true                      # P1 无 GPU 时用 mock 帧联调
+
+cache:
+  enabled: false                  # 高频回复缓存（P3 优化）
+  similarity_threshold: 0.9
+
+session:
+  idle_timeout_s: 1800            # 会话闲置回收

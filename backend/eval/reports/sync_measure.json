@@ -1,0 +1,34 @@
+{
+  "date": "2026-09-01",
+  "frame_ms": 20,
+  "method": "cross-correlation(audio_energy, lip_motion)",
+  "calibration": [
+    {
+      "offset_ms": 50,
+      "actual_offset_ms": 40,
+      "measured_ms": 40,
+      "error_ms": 0
+    },
+    {
+      "offset_ms": 100,
+      "actual_offset_ms": 100,
+      "measured_ms": 100,
+      "error_ms": 0
+    },
+    {
+      "offset_ms": 200,
+      "actual_offset_ms": 200,
+      "measured_ms": 200,
+      "error_ms": 0
+    },
+    {
+      "offset_ms": -100,
+      "actual_offset_ms": -100,
+      "measured_ms": -100,
+      "error_ms": 0
+    }
+  ],
+  "max_error_ms": 0,
+  "status": "PASSED",
+  "note": "自校准通过后，实测口径见 EVAL-测试集定义 §4.2（人工抽检 T4/T5 条目，与脚本值对照偏差≤30ms）"
+}

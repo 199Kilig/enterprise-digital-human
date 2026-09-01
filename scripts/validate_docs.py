@@ -34,6 +34,8 @@ TYPES = {
     "progress": {"prefix": "PROGRESS-", "sections": ["## 已完成"]},
     "retro":    {"prefix": "RETRO-",    "sections": ["## 3. 结果", "## 4. 可复现命令"]},
     "tech":     {"prefix": "TECH-",     "sections": ["## 2. 技术要点（MUST）", "## 3. 操作步骤（MUST）", "## 5. 亮点与代码锚点（MUST）"]},
+    "spec":     {"prefix": "SPEC-",     "sections": ["## 1. 文档目的"]},
+    "eval":     {"prefix": "EVAL-",     "sections": ["## 1. 文档目的"]},
 }
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 FM_FIELD_RE = re.compile(r"^(\w+):\s*(.+)$", re.MULTILINE)

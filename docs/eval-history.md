@@ -12,8 +12,8 @@
 
 | 维度 | 指标 | 数值 | 口径/场景 | 环境 | 来源 |
 |---|---|---|---|---|---|
-| 延迟 | ASR 首字延迟 | 待测 | 流式分片首字输出（V-03） | 本机 | eval/reports/funasr_streaming.json |
-| 延迟 | LLM 首 token | 待测 | 流式首 token（V-04） | 本机 | eval/reports/llm_streaming.json |
+| 延迟 | ASR 单块处理 | **166ms**（RTF 0.27） | 600ms/块流式，CPU；首字端到端≈766ms（V-03，2026-09-02） | 本机 | eval/reports/funasr_streaming.json |
+| 延迟 | LLM 首 token | **~740ms**（503~1108ms 波动） | deepseek-chat 流式首 token，3 次实测（V-04，2026-09-02） | 本机 | eval/reports/llm_streaming.json |
 | 延迟 | TTS 首包 | 待测 | 首包即播（V-02） | 云 GPU/本机 | eval/reports/cosyvoice_timestamp.json |
 | 延迟 | 口型首帧 | 待测 | MuseTalk 首帧（V-01） | 云 GPU | eval/reports/musetalk_validation.json |
 | 延迟 | 端到端 | 待测 | 用户说完→首帧（V-06） | 云 GPU | eval/reports/e2e_mock.json |

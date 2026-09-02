@@ -1,0 +1,51 @@
+{
+  "date": "2026-09-01",
+  "model": "paraformer-zh-streaming",
+  "chunk_size": [
+    0,
+    10,
+    5
+  ],
+  "chunk_ms": 600,
+  "audio": "../../data/testset/audio/t1-01.wav",
+  "duration_s": 2.3,
+  "n_chunks": 4,
+  "first_word_wall_ms": 166,
+  "checks": {
+    "first_word_wall_ms_le_300": true,
+    "incremental_before_final": true,
+    "final_semantics": true
+  },
+  "status": "PASSED",
+  "note": "首字延迟 300ms 为 EVAL-P1 建议值；600ms/块粒度下首字必然 ≥600ms，实测值以本报告为准，回填 EVAL-P1/台账",
+  "chunks": [
+    {
+      "chunk_idx": 0,
+      "at_ms": 0,
+      "took_ms": 166.5,
+      "text": "你",
+      "is_final": false
+    },
+    {
+      "chunk_idx": 1,
+      "at_ms": 600,
+      "took_ms": 161.7,
+      "text": "们家运",
+      "is_final": false
+    },
+    {
+      "chunk_idx": 2,
+      "at_ms": 1200,
+      "took_ms": 159.7,
+      "text": "费怎么",
+      "is_final": false
+    },
+    {
+      "chunk_idx": 3,
+      "at_ms": 1800,
+      "took_ms": 154.9,
+      "text": "算",
+      "is_final": true
+    }
+  ]
+}

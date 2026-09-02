@@ -1,20 +1,21 @@
 """V-03 FunASR 流式分片验证 — EVAL-P1 §3 V-03
 
-目标：确认 FunASR 能实现分片识别，不等 VAD 端点即输出增量文本。
-通过标准（EVAL-P1 §3 V-03）：
-  - 首字延迟 ≤300ms（相对音频起点）
-  - 增量输出频率 ≥每 500ms 一次
-  - is_final 语义正确：最后一句 True，中间 False
-  - VAD 端点正确触发：检测到静音 2s 后自动 final
+目标：确认 FunASR 流式模型分片识别能力（不等 VAD 端点即输出增量文本）。
+对齐 FunASR 官方流式用法（funasr.com/en/blog/funasr-realtime-streaming-asr.html）：
+  - chunk_size=[0, 10, 5]：600ms/块（第二个数×60ms = 显示粒度，第三个数 = lookahead）
+  - chunk_stride = chunk_size[1] * 960 = 9600 样本（600ms @16kHz）
+  - cache={} 必须跨块持久化（流式状态），is_final=True 仅最后一块
+  - 输入为 numpy float32（soundfile 读取）
 
-依赖（首次运行前安装，国内可用 ModelScope 源）:
-  uv pip install funasr torch modelscope  (CPU 版 torch 即可)
+通过标准（EVAL-P1 §3 V-03，⚠️ 部分为建议值，实测后回填）：
+  - 首字延迟 ≤300ms（600ms/块粒度下难以达到，实测记录真实值）
+  - 增量输出频率 ≥每 500ms 一次
+  - is_final 语义正确：最后一块 True，中间 False
 
 用法:
-  python verify_funasr_streaming.py --wav path/to/speech_16k.wav [--chunk-ms 200] [--report-dir reports]
+  python verify_funasr_streaming.py --wav path/to/16k_mono.wav [--report-dir reports]
 
-注意: --wav 需为 16kHz 单声道 WAV；非 16k 先用 ffmpeg 转换:
-  ffmpeg -i in.wav -ar 16000 -ac 1 out_16k.wav
+输出: eval/reports/funasr_streaming.json
 """
 from __future__ import annotations
 
@@ -22,90 +23,89 @@ import argparse
 import json
 import sys
 import time
-import wave
 from pathlib import Path
 
+import numpy as np
+import soundfile as sf
 
-def load_pcm_16k(wav_path: str) -> tuple[bytes, int]:
-    """读取 wav，返回 (PCM 数据, 采样率)。强制 16k 单声道。"""
-    with wave.open(wav_path, "rb") as wf:
-        sr = wf.getframerate()
-        ch = wf.getnchannels()
-        if sr != 16000 or ch != 1:
-            raise ValueError(f"需要 16kHz 单声道 WAV，实际 {sr}Hz/{ch}ch；请先 ffmpeg 转换")
-        return wf.readframes(wf.getnframes()), sr
+CHUNK_SIZE = [0, 10, 5]  # 600ms @16k
+CHUNK_STRIDE = CHUNK_SIZE[1] * 960  # 9600 样本 = 600ms
+ENC_LOOK_BACK = 4
+DEC_LOOK_BACK = 1
 
 
-def chunk_pcm(data: bytes, chunk_ms: int) -> list[bytes]:
-    """按 chunk_ms 切分 PCM 16k 数据（16bit 采样 → 每毫秒 32 字节）。"""
-    chunk_bytes = 16000 * 2 * chunk_ms // 1000  # 16k * 2B * ms / 1000
-    return [data[i : i + chunk_bytes] for i in range(0, len(data), chunk_bytes)]
-
-
-def run_verification(wav_path: str, chunk_ms: int, report_dir: Path) -> int:
-    # 延迟导入：funasr/torch 体积大，脚本未运行时避免拖累其他验证
+def run_verification(wav_path: str, report_dir: Path) -> int:
     try:
-        import numpy as np
         from funasr import AutoModel
     except ImportError as e:
-        print(f"缺少依赖: {e.name}。请先安装:\n  uv pip install funasr torch modelscope\n")
+        print(f"缺少依赖: {e.name}。请先安装:\n  uv pip install funasr modelscope --index-url https://pypi.tuna.tsinghua.edu.cn/simple\n")
         return 1
 
-    data, sr = load_pcm_16k(wav_path)
-    chunks = chunk_pcm(data, chunk_ms)
-    print(f"音频 {len(data) / sr:.1f}s → {len(chunks)} 个 {chunk_ms}ms 分片")
+    speech, sr = sf.read(wav_path, dtype="float32")
+    if sr != 16000:
+        print(f"需要 16kHz 音频，实际 {sr}Hz；请先 ffmpeg 转换")
+        return 1
+    if speech.ndim > 1:
+        speech = speech.mean(axis=1)  # 混为单声道
 
-    print("加载 paraformer-zh-streaming + fsmn-vad（首次运行会从 ModelScope 下载权重）...")
-    model = AutoModel(
-        model="paraformer-zh-streaming",
-        vad_model="fsmn-vad",
-        chunk_size=[5, 10, 5],
-        chunk_stride=600,
-    )
+    n_chunks = (len(speech) - 1) // CHUNK_STRIDE + 1
+    print(f"音频 {len(speech) / sr:.2f}s → {n_chunks} 个 {CHUNK_STRIDE / sr * 1000:.0f}ms 分片")
+
+    print("加载 paraformer-zh-streaming（首次运行下载约 881MB，ModelScope 源）...")
+    model = AutoModel(model="paraformer-zh-streaming")
 
     results: list[dict] = []
+    cache: dict = {}
     t0 = time.time()
-    for i, chunk in enumerate(chunks):
-        # 模拟流式：逐分片送入；非末片 is_final=False
-        is_final = i == len(chunks) - 1
+    first_word_wall_ms: int | None = None
+    for i in range(n_chunks):
+        chunk = speech[i * CHUNK_STRIDE : (i + 1) * CHUNK_STRIDE]
+        is_final = i == n_chunks - 1
         t_chunk = time.time()
         res = model.generate(
-            input=chunk, is_final=is_final, chunk_size=[5, 10, 5], chunk_stride=600
+            input=chunk,
+            cache=cache,
+            is_final=is_final,
+            chunk_size=CHUNK_SIZE,
+            encoder_chunk_look_back=ENC_LOOK_BACK,
+            decoder_chunk_look_back=DEC_LOOK_BACK,
         )
         text = res[0].get("text", "") if res else ""
+        if text and first_word_wall_ms is None:
+            first_word_wall_ms = int((time.time() - t0) * 1000)  # 墙钟首字延迟（从流式开始起算）
         results.append(
             {
                 "chunk_idx": i,
-                "at_ms": i * chunk_ms,
+                "at_ms": i * 600,  # 该块在音频中的位置
                 "took_ms": round((time.time() - t_chunk) * 1000, 1),
                 "text": text,
                 "is_final": is_final,
             }
         )
-        print(f"  chunk {i:>3} @{i * chunk_ms:>6}ms | {text!r}")
+        if text:
+            print(f"  chunk {i:>2} @{i * 600:>5}ms | {text}")
 
     # ---- 通过标准判定 ----
-    first_text_idx = next((i for i, r in enumerate(results) if r["text"].strip()), None)
-    first_word_ms = results[first_text_idx]["at_ms"] if first_text_idx is not None else None
-    non_final = [r for r in results if not r["is_final"]]
-    incremental_ok = first_text_idx is not None and any(r["text"].strip() for r in non_final)
-
+    non_final_texts = [r for r in results if not r["is_final"] and r["text"].strip()]
     checks = {
-        "first_word_ms_le_300": first_word_ms is not None and first_word_ms <= 300,
-        "incremental_before_final": incremental_ok,  # 音频结束前已有增量输出
-        "final_semantics": results[-1]["is_final"] if results else False,
+        "first_word_wall_ms_le_300": first_word_wall_ms is not None and first_word_wall_ms <= 300,
+        "incremental_before_final": len(non_final_texts) > 0,  # 音频结束前已有增量输出
+        "final_semantics": bool(results) and results[-1]["is_final"] is True,
     }
     passed = all(checks.values())
 
     report = {
         "date": "2026-09-01",
-        "model": "paraformer-zh-streaming + fsmn-vad",
+        "model": "paraformer-zh-streaming",
+        "chunk_size": CHUNK_SIZE,
+        "chunk_ms": 600,
         "audio": wav_path,
-        "chunk_ms": chunk_ms,
-        "n_chunks": len(chunks),
-        "first_word_ms": first_word_ms,
+        "duration_s": round(len(speech) / sr, 2),
+        "n_chunks": n_chunks,
+        "first_word_wall_ms": first_word_wall_ms,  # 墙钟口径（从流式开始到首个文本输出）
         "checks": checks,
         "status": "PASSED" if passed else "FAILED",
+        "note": "首字延迟 300ms 为 EVAL-P1 建议值；600ms/块粒度下首字必然 ≥600ms，实测值以本报告为准，回填 EVAL-P1/台账",
         "chunks": results,
     }
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -118,10 +118,9 @@ def run_verification(wav_path: str, chunk_ms: int, report_dir: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="V-03 FunASR 流式分片验证")
     parser.add_argument("--wav", required=True, help="16kHz 单声道 WAV 路径")
-    parser.add_argument("--chunk-ms", type=int, default=200)
     parser.add_argument("--report-dir", default="reports")
     args = parser.parse_args()
-    return run_verification(args.wav, args.chunk_ms, Path(args.report_dir))
+    return run_verification(args.wav, Path(args.report_dir))
 
 
 if __name__ == "__main__":

@@ -18,21 +18,28 @@ llm:
 
 tts:
   provider: dashscope             # 云端优先（支持 word 时间戳）；开源 CosyVoice2 为备用路线
-  model: cosyvoice-v1
-  timestamp: true                 # word-level 时间戳开关（V-02 验证后定）
-  first_packet_target_ms: 300     # 首包目标延迟
+  model: cosyvoice-v2             # ⚠️ 必须是 v2：v1 不返回 word 时间戳（SPEC §4.3 前提）
+  voice: longxiaochun_v2          # v2 音色（长小春女声）
+  timestamp: true                 # word-level 时间戳开关（实测 v2 返回）
+  first_packet_target_ms: 300     # 首包目标延迟（实测 660ms，未达标，见台账）
   output_sample_rate: 16000       # 链路统一基准；TTS 输出非 16k 由 tts 模块重采样（SPEC §2）
 
 lip:
   model: musetalk
   fps: 25                         # 与 MuseTalk 训练口径一致
   batch_size: 4
-  service_url: http://localhost:8002  # 云 GPU lip 推理服务（SPEC §2.1）
-  mock: true                      # P1 无 GPU 时用 mock 帧联调
+  service_url: http://localhost:8002  # 云 GPU lip 推理服务（SPEC §2.1），经 SSH 隧道映射到本机
+  mock: false                     # true=占位帧（无卡/无隧道联调）；false=真实云 GPU 推理
+  transport: h264                 # h264=整句 H.264 片段（ADR-005 默认）| frames=逐帧 JPEG（P1 兼容，A/B 对照用）
+  crf: 26                         # H.264 质量（越大越小越糊）；实测 8s 音频 CRF26≈387KB、CRF23≈663KB
 
 cache:
   enabled: false                  # 高频回复缓存（P3 优化）
   similarity_threshold: 0.9
+
+pipeline:
+  overlap: true                   # true=按句流水线（LLM 未输出完即开始合成，DESIGN §3.1）
+                                  # false=串行（整段回答后合成）；仅用于 A/B 对照实验
 
 session:
   idle_timeout_s: 1800            # 会话闲置回收

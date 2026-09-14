@@ -1,0 +1,99 @@
+{
+  "date": "2026-09-02",
+  "verifier": "V-01",
+  "model": "MuseTalk v1.0 (unet pytorch_model.bin 3.4G, musetalk.json)",
+  "env": {
+    "platform": "AutoDL instance f1e847b1b7 (内蒙古B区)",
+    "gpu": "NVIDIA GeForce RTX 4090 24GB",
+    "image": "PyTorch 2.0.0 / Python 3.8.10 (ubuntu20.04) / CUDA 11.8",
+    "mm_stack": "mmcv 2.0.1 / mmdet 3.1.0 / mmpose 1.1.0 (官方 pin, 预编译轮子)",
+    "entry": "python -m scripts.inference --inference_config configs/inference/test.yaml --version v1 (inference.sh v1.0 normal 等价)"
+  },
+  "tasks": [
+    {
+      "task": "task_0 (yongen.mp4 + yongen.wav)",
+      "output": "results/test/v1/yongen_yongen.mp4",
+      "frames": 200,
+      "duration_s": 8.022,
+      "resolution": "704x1216 (跟随输入视频原分辨率)",
+      "fps": 25
+    },
+    {
+      "task": "task_1 (yongen.mp4 + eng.wav, bbox_shift=-7)",
+      "output": "results/test/v1/yongen_eng.mp4",
+      "frames": 1500,
+      "duration_s": 60.064,
+      "resolution": "704x1216",
+      "fps": 25
+    }
+  ],
+  "metrics": {
+    "unet_batch_throughput_its": 6.06,
+    "unet_batch_size": 25,
+    "compose_concat_throughput_its": 13.03,
+    "compose_frames_total": 1500,
+    "compose_wall_s": 115,
+    "peak_vram_mib": 4828,
+    "peak_vram_gb": 4.7,
+    "audio_mux": "aac 16000Hz 合流成功"
+  },
+  "checks": {
+    "exit_code_zero": true,
+    "video_output_25fps": true,
+    "audio_track_present": true,
+    "frame_count_matches_audio": true,
+    "resolution_follows_input": true
+  },
+  "status": "PASSED",
+  "raw_log": "eval/reports/raw_logs/v01_normal_20260902.log",
+  "note": "首帧延迟口径未在本轮覆盖（normal 模式是离线批处理）；realtime 模式单独补测见 realtime_run。预处理含 s3fd 人脸检测 + dwpose，权重已缓存 /root/.cache/torch/hub/checkpoints/ 与 models/dwpose/。",
+  "pitfalls": [
+    "s3fd-619a316812.pth (85.7MB) adrianbulat 源站在云机上仅 15-50kB/s → 本机下载 (445kB/s) 后 sftp 上传到 /root/.cache/torch/hub/checkpoints/",
+    "无卡模式 pip 装 torch 2.27GB wheel 会 OOM Kill (exit 137)，换镜像后无此问题",
+    "mmcv 2.0.1 仅在 openmmlab cu118/torch2.0.0 索引有预编译轮子 (torch2.0.1 索引为空)"
+  ],
+
+  "realtime_run": {
+    "date": "2026-09-13",
+    "entry": "python -m scripts.realtime_inference --inference_config configs/inference/realtime.yaml --result_dir ./results/realtime --version v1 --fps 25 (inference.sh v1.0 realtime 等价)",
+    "config": "realtime.yaml avator_1: yongen.mp4 + bbox_shift 5 + 两段音频 (yongen.wav / eng.wav), preparation=True",
+    "outputs": [
+      {
+        "clip": "audio_0 (yongen.wav)",
+        "output": "results/avatars/avator_1/vid_output/audio_0.mp4",
+        "frames": 199,
+        "duration_s": 8.022,
+        "process_time_s": 12.346,
+        "throughput_fps": 16.20,
+        "ms_per_frame": 61.7,
+        "rtf_vs_25fps": 0.648,
+        "note": "含冷启动（首次推理 + 首次落盘），不代表稳态"
+      },
+      {
+        "clip": "audio_1 (eng.wav)",
+        "output": "results/avatars/avator_1/vid_output/audio_1.mp4",
+        "frames": 1499,
+        "duration_s": 60.064,
+        "process_time_s": 78.641,
+        "throughput_fps": 19.07,
+        "ms_per_frame": 52.4,
+        "rtf_vs_25fps": 0.763,
+        "note": "稳态口径（1500 帧全长），含每帧 PNG 落盘开销"
+      }
+    ],
+    "metrics": {
+      "steady_throughput_fps": 19.07,
+      "steady_ms_per_frame": 52.4,
+      "realtime_budget_ms_per_frame": 40.0,
+      "budget_gap_pct": 31.1,
+      "rtf": 0.763,
+      "audio_preprocess_ms": {"yongen.wav": 1892.4, "eng.wav": 33.6},
+      "vram_after_release_mib": 4,
+      "resolution": "704x1216@25fps",
+      "x264_crf": 18
+    },
+    "conclusion": "单卡单路 RTF=0.76 < 1.0：**25fps 流式追不上**，每帧缺口 12.4ms（52.4 vs 40.0）。音频预处理耗时 1.9s（首次）但稳态 33.6ms。该数值含逐帧 PNG 落盘 I/O，纯 GPU 生成吞吐应高于此（normal 模式 UNet 批吞吐 6.06 it/s×25 帧 ≈ 151 fps 生成侧，瓶颈在拼帧/落盘链路）。未优化项：batch_size 默认 20（可调）、无 fp16/量化、无跳帧策略。",
+    "not_measured": "首帧延迟（first-frame latency）本脚本不产出独立时间戳，需专门插桩测量（下一轮任务）",
+    "raw_log": "eval/reports/raw_logs/v01_realtime_20260913.log"
+  }
+}

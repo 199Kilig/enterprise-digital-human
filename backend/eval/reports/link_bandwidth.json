@@ -1,0 +1,95 @@
+[
+  {
+    "label": "campus",
+    "at": "2026-09-14 21:13:19",
+    "host": "connect.nmb1.seetacloud.com:47618",
+    "mb": 20,
+    "rtt_ms": 19.6,
+    "local_egress": {
+      "ok": false,
+      "url": null,
+      "mb": 0.0,
+      "seconds": 0.0,
+      "mbps": 0.0
+    },
+    "cloud_single": {
+      "ok": true,
+      "mb": 20.0,
+      "seconds": 20.62,
+      "mbps": 0.97
+    },
+    "cloud_parallel4": {
+      "ok": true,
+      "mb": 20.0,
+      "seconds": 21.41,
+      "mbps": 0.93
+    }
+  },
+  {
+    "label": "new-network",
+    "at": "2026-09-14 21:24:37",
+    "host": "connect.nmb1.seetacloud.com:47618",
+    "mb": 20,
+    "rtt_ms": 90.6,
+    "local_egress": {
+      "ok": true,
+      "url": "https://mirrors.aliyun.com/ubuntu/ls-lR.gz",
+      "mb": 20.0,
+      "seconds": 198.63,
+      "mbps": 0.1
+    },
+    "cloud_single": {
+      "ok": true,
+      "mb": 20.0,
+      "seconds": 127.32,
+      "mbps": 0.16
+    },
+    "cloud_parallel4": {
+      "ok": true,
+      "mb": 20.0,
+      "seconds": 22.6,
+      "mbps": 0.89
+    }
+  },
+  {
+    "label": "new-network-retest",
+    "at": "2026-09-14 21:34:38",
+    "host": "connect.nmb1.seetacloud.com:47618",
+    "mb": 8,
+    "rtt_ms": 15.7,
+    "local_egress": {
+      "ok": false,
+      "url": null,
+      "mb": 0.0,
+      "seconds": 0.0,
+      "mbps": 0.0
+    },
+    "cloud_single_runs": [
+      {
+        "ok": true,
+        "mb": 8.0,
+        "seconds": 7.82,
+        "mbps": 1.02
+      },
+      {
+        "ok": true,
+        "mb": 8.0,
+        "seconds": 8.84,
+        "mbps": 0.91
+      }
+    ],
+    "cloud_single": {
+      "ok": true,
+      "mb": 8.0,
+      "seconds": 7.82,
+      "mbps": 1.02
+    },
+    "single_spread": 0.108,
+    "cloud_parallel4": {
+      "ok": true,
+      "mb": 8.0,
+      "seconds": 8.6,
+      "mbps": 0.93
+    }
+  }
+]

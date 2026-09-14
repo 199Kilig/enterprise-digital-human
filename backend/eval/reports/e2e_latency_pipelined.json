@@ -1,0 +1,180 @@
+{
+  "date": "2026-09-14",
+  "verifier": "V-06",
+  "scope": "文本输入 → LLM 流式 → TTS 流式 → 首包（不含 ASR；不含口型）",
+  "env": "本机（Windows），后端 uvicorn:8010",
+  "questions": [
+    "你们家运费怎么算？",
+    "退货要几天到账？",
+    "我买的衣服不合适，想换尺码怎么操作？",
+    "订单一直没发货，能帮我查一下吗？",
+    "发票怎么开？",
+    "你们家运费怎么算？"
+  ],
+  "runs": [
+    {
+      "question": "你们家运费怎么算？",
+      "tokens": 31,
+      "answer_chars": 56,
+      "audio_s": 10.41,
+      "ttft_ms": 798,
+      "llm_done_ms": 1137,
+      "tts_start_ms": 1063,
+      "first_audio_ms": 1573,
+      "first_audio_wall_ms": 1584,
+      "turn_done_ms": 5112,
+      "tts_first_packet_ms": 1573,
+      "tts_total_ms": 5023,
+      "tts_words": 56,
+      "state_after": "listening",
+      "overlapped": true
+    },
+    {
+      "question": "退货要几天到账？",
+      "tokens": 25,
+      "answer_chars": 41,
+      "audio_s": 7.53,
+      "ttft_ms": 240,
+      "llm_done_ms": 530,
+      "tts_start_ms": 530,
+      "first_audio_ms": 872,
+      "first_audio_wall_ms": 875,
+      "turn_done_ms": 3363,
+      "tts_first_packet_ms": 872,
+      "tts_total_ms": 3326,
+      "tts_words": 41,
+      "state_after": "listening",
+      "overlapped": false
+    },
+    {
+      "question": "我买的衣服不合适，想换尺码怎么操作？",
+      "tokens": 36,
+      "answer_chars": 55,
+      "audio_s": 10.81,
+      "ttft_ms": 317,
+      "llm_done_ms": 603,
+      "tts_start_ms": 543,
+      "first_audio_ms": 907,
+      "first_audio_wall_ms": 910,
+      "turn_done_ms": 4742,
+      "tts_first_packet_ms": 907,
+      "tts_total_ms": 4712,
+      "tts_words": 55,
+      "state_after": "listening",
+      "overlapped": true
+    },
+    {
+      "question": "订单一直没发货，能帮我查一下吗？",
+      "tokens": 26,
+      "answer_chars": 41,
+      "audio_s": 7.49,
+      "ttft_ms": 335,
+      "llm_done_ms": 563,
+      "tts_start_ms": 518,
+      "first_audio_ms": 889,
+      "first_audio_wall_ms": 892,
+      "turn_done_ms": 3548,
+      "tts_first_packet_ms": 889,
+      "tts_total_ms": 3517,
+      "tts_words": 41,
+      "state_after": "listening",
+      "overlapped": true
+    },
+    {
+      "question": "发票怎么开？",
+      "tokens": 28,
+      "answer_chars": 50,
+      "audio_s": 9.45,
+      "ttft_ms": 739,
+      "llm_done_ms": 1011,
+      "tts_start_ms": 956,
+      "first_audio_ms": 1268,
+      "first_audio_wall_ms": 1290,
+      "turn_done_ms": 4500,
+      "tts_first_packet_ms": 1268,
+      "tts_total_ms": 4447,
+      "tts_words": 50,
+      "state_after": "listening",
+      "overlapped": true
+    },
+    {
+      "question": "你们家运费怎么算？",
+      "tokens": 30,
+      "answer_chars": 53,
+      "audio_s": 10.33,
+      "ttft_ms": 645,
+      "llm_done_ms": 847,
+      "tts_start_ms": 806,
+      "first_audio_ms": 1204,
+      "first_audio_wall_ms": 1207,
+      "turn_done_ms": 5126,
+      "tts_first_packet_ms": 1204,
+      "tts_total_ms": 5094,
+      "tts_words": 53,
+      "state_after": "listening",
+      "overlapped": true
+    }
+  ],
+  "aggregates": {
+    "ttft_ms": {
+      "n": 6,
+      "mean": 512.3,
+      "median": 490.0,
+      "min": 240,
+      "max": 798,
+      "stdev": 221.5
+    },
+    "llm_done_ms": {
+      "n": 6,
+      "mean": 781.8,
+      "median": 725.0,
+      "min": 530,
+      "max": 1137,
+      "stdev": 233.2
+    },
+    "tts_start_ms": {
+      "n": 6,
+      "mean": 736,
+      "median": 674.5,
+      "min": 518,
+      "max": 1063,
+      "stdev": 218.9
+    },
+    "first_audio_ms": {
+      "n": 6,
+      "mean": 1118.8,
+      "median": 1055.5,
+      "min": 872,
+      "max": 1573,
+      "stdev": 256.4
+    },
+    "tts_first_packet_ms": {
+      "n": 6,
+      "mean": 1118.8,
+      "median": 1055.5,
+      "min": 872,
+      "max": 1573,
+      "stdev": 256.4
+    },
+    "turn_done_ms": {
+      "n": 6,
+      "mean": 4398.5,
+      "median": 4621.0,
+      "min": 3363,
+      "max": 5126,
+      "stdev": 702.6
+    }
+  },
+  "overlap_rate": 0.833,
+  "checks": {
+    "first_audio_mean_lt_2s": true,
+    "pipeline_overlap": false
+  },
+  "target_ms": 2000,
+  "notes": [
+    "首次出声 = 用户提交 → 首个 tts_audio 事件；PRD 的'数字人开口'按 DESIGN §5.1 统一为首包口径",
+    "不含 ASR：语音输入接入后需叠加 ASR 首字（V-03 实测 ≈766ms），届时需重新评估是否守住 2s",
+    "overlapped = 首句送合成时刻 < LLM 完成时刻；这是流水线并行（DESIGN §3.1）的直接证据"
+  ],
+  "status": "FAILED"
+}

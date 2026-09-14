@@ -42,7 +42,7 @@ class MuseTalkLipEngine(LipEngine):
 
     def __init__(
         self,
-        service_url: str = "http://localhost:8002",
+        service_url: str = "http://127.0.0.1:8002",
         timeout_s: float = 120.0,
         transport: str = "h264",
         crf: int = 26,
@@ -129,7 +129,7 @@ def build_lip_engine(cfg: dict | None = None) -> LipEngine:
 
         return MockLipEngine()
     return MuseTalkLipEngine(
-        service_url=cfg.get("service_url", "http://localhost:8002"),
+        service_url=cfg.get("service_url", "http://127.0.0.1:8002"),
         transport=cfg.get("transport", "h264"),
         crf=int(cfg.get("crf", 26)),
     )

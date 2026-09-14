@@ -28,10 +28,14 @@ lip:
   model: musetalk
   fps: 25                         # 与 MuseTalk 训练口径一致
   batch_size: 4
-  service_url: http://localhost:8002  # 云 GPU lip 推理服务（SPEC §2.1），经 SSH 隧道映射到本机
+  service_url: http://127.0.0.1:8002  # 云 GPU lip 推理服务（SPEC §2.1），经 SSH 隧道映射到本机
+  # ⚠️ 必须写 127.0.0.1，不要写 localhost：本机 localhost 名字解析耗时 ~2 秒/次（实测见 RUNBOOK 坑 20），
+  #    口型按分片调用时这个开销会直接叠加到音画偏差上
   mock: false                     # true=占位帧（无卡/无隧道联调）；false=真实云 GPU 推理
   transport: h264                 # h264=整句 H.264 片段（ADR-005 默认）| frames=逐帧 JPEG（P1 兼容，A/B 对照用）
   crf: 26                         # H.264 质量（越大越小越糊）；实测 8s 音频 CRF26≈387KB、CRF23≈663KB
+  chunk_ms: 1000                  # ADR-006：口型按音频分片送推理的片长（毫秒）；1000=每秒一片
+  min_tail_ms: 200                # 句尾残片短于此值不单独推理（省一次 GPU 占用）
 
 cache:
   enabled: false                  # 高频回复缓存（P3 优化）

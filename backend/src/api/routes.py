@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import time
 import uuid
 from datetime import datetime, timezone
@@ -30,7 +31,10 @@ from tts.cosyvoice import CosyVoiceTts, TtsError
 router = APIRouter(prefix="/api/v1")
 
 app = FastAPI(title="企业级数字人 backend（P1 骨架）")
-app.include_router(router)
+# include_router 统一放在文件末尾（所有 @router.xxx 之后）。
+# 本版本（FastAPI 0.141.1）的 include_router 是**惰性**的（app.routes 里是一个 `_IncludedRouter`，
+# 请求时才解析），所以放前面也能用；但老版本是快照式（注册那刻 router 里有什么就是什么），
+# 放末尾对两种语义都成立，且 app.routes 不直接可见路由（见 tests/test_api_app.py 用 openapi 断言）。
 
 # 对话大脑 + 语音合成单例（config.yaml 驱动；密钥经 src/config.py 从 env/.env 注入）
 _brain = DeepSeekBrain()
@@ -43,6 +47,14 @@ _lip = build_lip_engine(_CFG)
 _LIP_CFG = _CFG.get("lip") or {}
 _LIP_ON = not bool(_LIP_CFG.get("mock", True))
 _LIP_FPS = int(_LIP_CFG.get("fps", 25))
+# ADR-006：口型按音频**分片**送推理（不是整句一次），以缩小音画偏差。
+# 16kHz 单声道 PCM16 = 32 字节/毫秒
+_LIP_CHUNK_MS = int(_LIP_CFG.get("chunk_ms", 1000))
+_LIP_CHUNK_BYTES = max(1, _LIP_CHUNK_MS) * 32
+_LIP_MIN_TAIL_MS = int(_LIP_CFG.get("min_tail_ms", 200))
+_LIP_MIN_TAIL_BYTES = max(1, _LIP_MIN_TAIL_MS) * 32
+# 逐片诊断日志（默认关）：排查音画偏差时设 LIP_DEBUG=1，会打印每片的派发/返回时刻
+_LIP_DEBUG = os.environ.get("LIP_DEBUG", "") == "1"
 
 # 流水线重叠开关（config.yaml pipeline.overlap）：false 时退化为串行（整段回答后合成），
 # 保留该开关是为了 A/B 对照——"优化了多少"必须能测，不能靠感觉（见 eval/verify_e2e_latency.py）
@@ -252,6 +264,7 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
         lip_info: Dict[str, object] = {
             "frames": 0, "sentences": 0, "first_ms": None, "total_ms": 0,
             "gpu_mb": 0, "infer_fps": 0.0, "error": None, "transport": None, "bytes": 0,
+            "dispatched": 0, "chunk_ms": _LIP_CHUNK_MS,
         }
 
         async def llm_producer() -> None:
@@ -296,7 +309,7 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
                     if tts_info["start_ms"] is None:
                         # 流水线重叠的真凭据：首句交给 TTS 的时刻（此刻 LLM 可能还在生成）
                         tts_info["start_ms"] = int((time.perf_counter() - t0) * 1000)
-                    sent_offset = offset_ms  # 本句在整段回答中的起点 = 口型帧的时钟基准
+                    buf_start_ms = offset_ms  # 待发分片在音频时钟上的起点（口型片段排期用）
                     pcm_buf = bytearray()
                     async for chunk in _tts.stream(sentence, start_offset_ms=offset_ms):
                         if chunk.audio:
@@ -304,11 +317,27 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
                                 tts_info["first_ms"] = int((time.perf_counter() - t0) * 1000)
                             offset_ms = chunk.offset_ms + int(len(chunk.audio) / 32)  # 32 B/ms
                             pcm_buf.extend(chunk.audio)
+                            # ADR-006：音频一到就按 ~chunk_ms 切片送口型，**不等整句合成完**。
+                            # 依据：TTS 合成快于实时（实测 5.27s 出 7.28s 音频），分片送检才能让
+                            # 口型片段在该播之前就绪；整句送检时首片段迟到 5.3s（见 ADR-006 实测表）。
+                            while _LIP_ON and len(pcm_buf) >= _LIP_CHUNK_BYTES:
+                                await lip_in_q.put((bytes(pcm_buf[:_LIP_CHUNK_BYTES]), buf_start_ms))
+                                del pcm_buf[:_LIP_CHUNK_BYTES]
+                                # 诊断日志（LIP_DEBUG=1 时开）：派发时刻 vs 音频时钟
+                                if _LIP_DEBUG:
+                                    print(
+                                        f"[lip] dispatch start={buf_start_ms}ms "
+                                        f"at_ms={int((time.perf_counter() - t0) * 1000)} audio_pos={offset_ms}ms",
+                                        flush=True,
+                                    )
+                                buf_start_ms += _LIP_CHUNK_MS
+                                lip_info["dispatched"] = int(lip_info["dispatched"]) + 1
                         tts_info["words"] = int(tts_info["words"]) + len(chunk.words)
                         await audio_q.put(chunk)
-                    # 整句 PCM 收齐才交口型：口型推理以句为单位（不能按 TTS 分片喂）
-                    if _LIP_ON and pcm_buf:
-                        await lip_in_q.put((bytes(pcm_buf), sent_offset))
+                    # 句尾残片：太短就不单独跑一次推理（不值得为几十毫秒占一次 GPU）
+                    if _LIP_ON and len(pcm_buf) >= _LIP_MIN_TAIL_BYTES:
+                        await lip_in_q.put((bytes(pcm_buf), buf_start_ms))
+                        lip_info["dispatched"] = int(lip_info["dispatched"]) + 1
             except TtsError as exc:
                 tts_info["error"] = exc
             finally:
@@ -329,11 +358,19 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
                     if item is None:
                         break
                     pcm, sent_offset = item
+                    t_recv = time.perf_counter()
                     try:
                         res = await asyncio.to_thread(_lip.infer, pcm, [], _LIP_FPS, session_id)
                     except LipServiceError as exc:
                         lip_info["error"] = str(exc)
                         continue
+                    if _LIP_DEBUG:
+                        print(
+                            f"[lip] done start={sent_offset}ms recv_ms={int((t_recv - t0) * 1000)} "
+                            f"call_ms={res['wall_ms']} emit_ms={int((time.perf_counter() - t0) * 1000)} "
+                            f"qsize={lip_in_q.qsize()}",
+                            flush=True,
+                        )
                     lip_info["sentences"] = int(lip_info["sentences"]) + 1
                     lip_info["frames"] = int(lip_info["frames"]) + int(res.get("n_frames", 0))
                     lip_info["gpu_mb"] = res["gpu_memory_mb"]
@@ -509,6 +546,8 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
                 "lip_gpu_memory_mb": lip_info["gpu_mb"],
                 "lip_transport": lip_info["transport"],
                 "lip_bytes": lip_info["bytes"],
+                "lip_chunks": lip_info["dispatched"],
+                "lip_chunk_ms": lip_info["chunk_ms"],
                 "lip_error": lip_info["error"],
                 "ttft_ms": ttft_ms,
                 "tokens": len(parts),
@@ -610,7 +649,7 @@ def health() -> dict:
     import urllib.error
     import urllib.request
 
-    lip_url = _LIP_CFG.get("service_url", "http://localhost:8002")
+    lip_url = _LIP_CFG.get("service_url", "http://127.0.0.1:8002")
     reachable, mode, detail = False, ("mock（占位帧，未接云 GPU）" if not _LIP_ON else "musetalk（云 GPU）"), None
     try:
         # 用 /health 而不是 /docs：/docs 只是文档页，不代表模型已加载
@@ -618,9 +657,15 @@ def health() -> dict:
             reachable = resp.status == 200
             if reachable and _LIP_ON:
                 info = json.loads(resp.read().decode("utf-8"))
+                # 诚实标注：连的是真云 GPU 还是 fake 回放（eval/fake_lip_server.py）
+                # —— 否则界面会把"回放固定素材"显示成"云 GPU 实时推理"
+                if str(info.get("version", "")).lower() in ("fake", "mock") or info.get("device") == "cpu":
+                    mode = "FAKE 回放（协议联调，非真实推理）"
                 detail = {
                     "device": info.get("device"),
                     "avatar": info.get("avatar"),
+                    "service_version": info.get("version"),
+                    "transport_default": info.get("transport_default"),
                     "frames_cached": info.get("frames_cached"),
                     "gpu_free_mb": info.get("gpu_free_mb"),
                     "gpu_total_mb": info.get("gpu_total_mb"),
@@ -751,3 +796,7 @@ def eval_ledger() -> dict:
         "source_file": "docs/eval-history.md",
         "rows": rows,
     }
+
+
+# 统一在文件末尾注册（对 include_router 的惰性/快照两种语义都成立）
+app.include_router(router)

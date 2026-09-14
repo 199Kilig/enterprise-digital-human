@@ -141,7 +141,20 @@ POST /api/v1/lip/infer
 }
 ```
 
-**响应**：
+**响应**（v1.2 起：`transport=h264` 为默认，见 ADR-005）：
+
+```json
+{
+  "video_b64": "...",                   // H.264(MP4) 整句片段 base64（ADR-005 默认载体）
+  "duration_ms": 7320,                  // 片段时长 = 帧数/fps*1000
+  "n_frames": 183,
+  "fps": 25,
+  "gpu_memory_mb": 8500,                // 推理显存记录（评估台账数据源）
+  "infer_fps": 92.2                     // 推理帧率（评估台账数据源）
+}
+```
+
+**响应**（`transport=frames` 兼容路径，P1 原样保留用于 A/B 对照）：
 
 ```json
 {
@@ -151,7 +164,10 @@ POST /api/v1/lip/infer
 }
 ```
 
+- `transport` 由请求字段或 `config.yaml → lip.transport` 决定；默认 `h264`
 - `frames` 的 `pts_ms` 以请求音频的起始时间 0 为基准，与 `TtsSegment` 时间戳同源（音频时钟），供前端/评估按 SPEC §3.5 调度
+- `video_b64` 的播放起始时刻同样以请求音频起点为基准：片段第 0 帧对应音频时间 0
+- 两种载体的**渲染输出均为形象原分辨率**（SPEC §4.3），H.264 只是传输编码
 - 失败返回 SPEC §6 错误码（`LIP_TIMEOUT` / `LIP_OOM` / `LIP_ERROR` 可扩展）；P1 无 GPU 时允许 mock 实现（返回静态帧）供本机链路联调
 
 ------
@@ -183,7 +199,8 @@ data: {JSON}
 | `thinking`    | 进入对话大脑阶段           | `{"state": "thinking", "timestamp_ms": 12345}`               | 状态标记，用于前端展示"思考中"                      |
 | `interrupted` | 后端收到打断信号，开始清理 | `{"state":"interrupted", "timestamp_ms": 12345}`             | 前端收到后停止接收新 TTS/口型分片，开始清理播放队列 |
 | `tts_audio`   | TTS 输出每个音频分片       | `{"seq": 0, "audio_b64": "...", "start_ms": 0, "end_ms": 320, "words": [["你好",0,300]]}` | audio_b64 为 PCM 数据的 base64 编码                 |
-| `lip_frame`   | 口型驱动输出视频帧         | `{"seq": 0, "frame_b64": "...", "pts_ms": 0, "frame_idx": 0}` | frame_b64 为 JPEG（P1）/H.264（P2）的 base64        |
+| `lip_frame`   | 口型驱动输出视频帧（`transport=frames` 兼容路径） | `{"seq": 0, "frame_b64": "...", "pts_ms": 0, "frame_idx": 0}` | frame_b64 为 JPEG 的 base64；P1 原路径，仅 A/B 对照时启用 |
+| `lip_video`   | 口型驱动输出**整句 H.264 片段**（v1.2 默认，见 ADR-005） | `{"seq": 0, "video_b64": "...", "start_ms": 0, "duration_ms": 320, "n_frames": 8, "fps": 25, "sentence_offset_ms": 0}` | video_b64 为 MP4(H.264) 的 base64；一个片段对应一句回答音频 |
 | `done`        | 一次回答完整结束           | `{"total_seq_audio": 10, "total_seq_lip": 45, "duration_ms": 3200}` | 前端收到后关闭本次播放循环                          |
 | `error`       | 任何环节出错               | `{"code": "TTS_TIMEOUT", "message": "...", "retry_after": 3}` | 见 §6 错误码                                        |
 
@@ -212,7 +229,8 @@ data: {"total_seq_audio":2,"total_seq_lip":45,"duration_ms":3200}
 ### 3.5 前端处理约定
 
 1. **tts_audio 首包即播**：不等 `done`，收到即开始播放音频（PCM 需转 WebRTC 可消费格式）。
-2. **lip_frame 按 `pts_ms` 调度**：以音频时钟为基准，`pts_ms` 对应的音频时间到达时才渲染该帧。**帧丢弃策略**：若某帧到达时其 `pts_ms` 已落后当前音频时钟 >50ms，则丢弃（防止音画追赶时画面跳变）。
+2. **lip_frame 按 `pts_ms` 调度**：以音频时钟为基准，`pts_ms` 对应的音频时间到达时才渲染该帧。**帧丢弃策略**：若某帧到达时其 `pts_ms` 已落后当前音频时钟 >50ms，则丢弃（防止音画追赶时画面跳变）。（仅 `transport=frames` 路径）
+2b. **lip_video 按 `start_ms` 排队播放**（v1.2 默认，见 ADR-005）：片段第 0 帧对应音频时钟的 `start_ms`；前端维护按 `start_ms` 升序的片段队列，到点播放。**片段迟到策略**：若片段到达时其 `start_ms` 已落后音频时钟（即该句已开始播报），允许立即从头播放并接受音画偏差，或丢弃该片段（由前端策略决定，实测偏差需记录进评估台账）。
 3. **seq 检测**：前端维护 `last_seq_audio` 和 `last_seq_lip`，若收到非连续 seq → 上报 `WARN` 日志，不影响播放。
 
 ------
@@ -352,6 +370,7 @@ DELETE /api/v1/session/{session_id}
 | v0.1     | 2026-09-01     | 初稿，基于 DESIGN §4 扩充                                    | -    |
 | **v1.0** | **2026-09-01** | **定稿：补 interrupt_done 端点、interrupted 事件、seq 原则修正、错误码统一、DataChannel 二进制传输** | -    |
 | **v1.1** | **2026-09-01** | **勘误：TtsSegment 增 sample_rate 字段、新增 §2.1 lip 推理服务接口、§4.3 分辨率表述修正、§7 端到端口径统一为"首包"** | -    |
+| **v1.2** | **2026-09-14** | **口型传输载体改为 H.264 整句片段：§2.1 响应增 `video_b64`/`duration_ms`/`n_frames`（`frames` 保留为兼容路径）、§3.3 新增 `lip_video` 事件、§3.5 增片段排队播放约定。**依据 ADR-005**（实测跨机链路 0.96MB/s，逐帧 JPEG 16.2s/句 vs H.264 0.39s，41×）** | -    |
 
 **变更规则**：
 

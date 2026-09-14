@@ -1,0 +1,138 @@
+/* ============================================================================
+   设计 token · 实时链路控制台
+   ----------------------------------------------------------------------------
+   主题策略：浅色为默认（企业后台白天办公场景），深色可选（长时间盯监控台）。
+   组件一律只引用变量，不写死颜色 —— 切主题时零改动。
+
+   锚定依据（不是自创审美）：
+   1) 间距/字号：8pt 网格 + 12–14px 正文——LiveKit Agents 控制台、ElevenLabs
+      Conversational AI 面板的会话/延迟视图均为该量级；实时监控台信息密度高，
+      正文小于 12px 不可读，大于 14px 浪费垂直空间。
+   2) 延迟瀑布图：Datadog APM trace span 瀑布（横向 span + 左侧标签 + 右侧时长），
+      这是"每段打点归因"的行业既有形态，PRD FR-07 要求的正是这个可视物。
+   3) 指标数字：tabular-nums + 等宽——Datadog/Grafana/LiveKit 的指标读数一致做法，
+      避免数字跳动时列宽抖动。
+   4) 状态色：实时系统语义色（listening/thinking/speaking/interrupted），
+      单一强调色 + 语义色策略，禁用霓虹渐变与彩色阴影。
+   ========================================================================== */
+
+/* ---------------- 浅色主题（默认） ---------------- */
+:root,
+[data-theme='light'] {
+  --bg-base: #f4f6f8;
+  --bg-surface: #ffffff;
+  --bg-raised: #f7f8fa;
+  --bg-inset: #eef1f5;
+  --bg-hover: #f0f3f7;
+
+  --border: #e3e7ec;
+  --border-strong: #cbd2db;
+
+  --text-primary: #16191f;
+  --text-secondary: #5b6675;
+  --text-tertiary: #8b95a3;
+
+  --accent: #2f6fed;
+  --accent-dim: rgba(47, 111, 237, 0.1);
+  --accent-border: rgba(47, 111, 237, 0.38);
+  --on-accent: #ffffff;
+
+  /* SPEC §4.1 会话状态机语义色 */
+  --state-listening: #2f6fed;
+  --state-thinking: #b57e12;
+  --state-speaking: #17805c;
+  --state-interrupted: #c2483a;
+  --state-error: #c2483a;
+  --state-idle: #8b95a3;
+
+  /* PRD §3 验收标准 vs 实测 */
+  --ok: #17805c;
+  --ok-border: rgba(23, 128, 92, 0.42);
+  --warn: #b57e12;
+  --warn-border: rgba(181, 126, 18, 0.42);
+  --fail: #c2483a;
+  --fail-border: rgba(194, 72, 58, 0.45);
+
+  /* 视频区遮罩：视频上是深色底，两主题通用 */
+  --overlay-bg: rgba(10, 13, 18, 0.82);
+  --overlay-text: #c9d1dc;
+
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+/* ---------------- 深色主题 ---------------- */
+[data-theme='dark'] {
+  --bg-base: #0e1116;
+  --bg-surface: #151922;
+  --bg-raised: #1b2029;
+  --bg-inset: #0a0d12;
+  --bg-hover: #212734;
+
+  --border: #262d3a;
+  --border-strong: #344052;
+
+  --text-primary: #e6e9ef;
+  --text-secondary: #9aa4b2;
+  --text-tertiary: #6b7480;
+
+  --accent: #4c8dff;
+  --accent-dim: rgba(76, 141, 255, 0.14);
+  --accent-border: rgba(76, 141, 255, 0.35);
+  --on-accent: #06101f;
+
+  --state-listening: #4c8dff;
+  --state-thinking: #d8a13a;
+  --state-speaking: #2fa37a;
+  --state-interrupted: #d96a5a;
+  --state-error: #d94f4f;
+  --state-idle: #6b7480;
+
+  --ok: #2fa37a;
+  --ok-border: rgba(47, 163, 122, 0.45);
+  --warn: #d8a13a;
+  --warn-border: rgba(216, 161, 58, 0.45);
+  --fail: #d96a5a;
+  --fail-border: rgba(217, 106, 90, 0.5);
+
+  --overlay-bg: rgba(10, 13, 18, 0.82);
+  --overlay-text: #c9d1dc;
+
+  --shadow-card: none;
+}
+
+:root {
+  /* ---- 间距（8pt 网格 + 4px 半步） ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* ---- 字号 ---- */
+  --fs-micro: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-display: 28px;
+
+  /* ---- 圆角（企业后台 4–8px） ---- */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+
+  /* ---- 字体 ---- */
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei',
+    'PingFang SC', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas,
+    'Liberation Mono', monospace;
+
+  --lh-tight: 1.25;
+  --lh-base: 1.55;
+
+  /* ---- 数字人舞台尺寸（2026-09-13 收小：原 9/12 全宽过高） ---- */
+  --stage-max-width: 300px;
+  --stage-aspect: 9 / 16;
+}

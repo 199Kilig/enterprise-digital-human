@@ -17,6 +17,8 @@ venv/
 
 # Node
 node_modules/
+dist/
+*.tsbuildinfo
 
 # IDE / 工具
 .vscode/

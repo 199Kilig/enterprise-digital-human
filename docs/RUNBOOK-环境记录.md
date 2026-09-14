@@ -131,6 +131,32 @@ cd backend/eval && ../.venv/Scripts/python.exe verify_e2e_latency.py --runs 6 --
 17. **「线程重叠融合更快」结论存疑，勿引用（2026-09-14）**：首次测量（51.4→23.5 fps，结论"线程更慢"）时进程内有**残留/共存进程抢 GPU**，测量被污染；干净环境下 bench 自身又 OOM（见 16），未取得可信复测值。服务代码现为**串行**（保守且实测可用），CPU 融合并行化待专门实验。
 18. **实例重建后 SSH host key 变更（2026-09-14）**：`ssh -L` 报 `REMOTE HOST IDENTIFICATION HAS CHANGED`，直接 `ssh-keygen -R "[connect.nmb1.seetacloud.com]:47618"` 清陈旧条目即可（重建实例会重新生成主机密钥，非攻击）。
 19. **本机访问云服务用 SSH 隧道**：`ssh -N -L 8002:127.0.0.1:8002 -p 47618 root@connect.nmb1.seetacloud.com`（公钥已入 `authorized_keys`，免密）。隧道断了重启即可，服务本身不受影响。
+20. **⚠️ 本机 `localhost` 名字解析要 ~2 秒 —— 服务互调一律写 `127.0.0.1`（2026-09-14 实测）**：同一服务同一台机器，四种组合对照（`eval/probe_call_path.py`）：
+
+    | 调用方式 | 3 次耗时 |
+    |---|---|
+    | requests + `127.0.0.1` | 5.4 / 5.1 / 22.6 ms |
+    | urllib + `127.0.0.1` | 3.7 / 4.0 / 2.9 ms |
+    | requests + `localhost` | **2034 / 2028 / 2049 ms** |
+    | urllib + `localhost` | **2029 / 2056 / 2050 ms** |
+
+    与客户端库无关，**是名字解析**（疑似 IPv6 回退/慢解析路径）。踩坑现场：后端 `lip.service_url` 写作
+    `http://localhost:8002`，每片口型白付 2 秒，直接叠加成"嘴比声音慢 2 秒"。
+    **规则：本机服务互调（后端→口型服务、脚本→后端）一律写 `127.0.0.1`**；浏览器地址栏给人看的 URL 可继续用 localhost。
+21. **音画偏差怎么量**：`python backend/eval/verify_lip_sync.py "问题"`——以首个 `tts_audio` 到达为音频时钟原点，
+    打印每片的 `late_ms`（正=晚到/负=提前）与 TTS 合成速率。**判据：正值 >500ms 人眼可辨；负值=提前到达，排队等播不算问题**。
+    排查顺序：先看 `call_ms`（口型 HTTP 调用耗时，正常应为个位数 ms，若 ~2000ms 见坑 20），
+    再看 TTS 合成速率（<1 表示音频还没生成出来，口型必然追不上）。
+22. **`.bat` 必须纯 ASCII + CRLF（2026-09-14 踩）**：cmd.exe 按 **OEM 代码页**（中文 Windows = GBK）解析 .bat，
+    UTF-8 的中文/emoji 会变乱码，乱码字节还可能被当成命令分隔符导致脚本行为异常。
+    `start-lip-tunnel.bat` / `start-fake-lip.bat` 曾因此不可用（`start.bat`/`stop.bat` 一直是纯 ASCII 所以没事）。
+    自检：`LC_ALL=C grep -c $'[\x80-\xff]' xxx.bat` 必须为 **0**。
+    **另外禁用 `timeout /t N`**：在 git-bash/MSYS 环境里该名字被 GNU coreutils 的 `timeout` 抢走，
+    报 `timeout: invalid time interval '/t'` 并中断脚本——改用 `curl --retry --retry-delay --retry-connrefused` 等待。
+23. **Python 脚本打印 emoji 在 GBK 控制台会崩（2026-09-14 踩，已复现）**：`print("⚠️")` 抛
+    `UnicodeEncodeError: 'gbk' codec can't encode character '\u26a0'`，**服务/脚本当场退出**。
+    双保险：① 脚本顶部 `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`；
+    ② .bat 里先 `chcp 65001 >nul` 再调 Python。已在 `fake_lip_server.py` / `verify_e2e_lip.py` / `verify_lip_sync.py` 落地。
 
 ### 3.10 口型推理服务（2026-09-14 落地）
 
@@ -193,6 +219,18 @@ python backend/eval/fake_lip_server.py --port 8002
 python backend/eval/verify_e2e_lip.py "运费怎么算"
 ```
 > ⚠️ 假服务**不产生口型，性能/延迟数字一律无效**，只验协议形状；精确载荷只认云 GPU 实测。
+
+### 3.14 口型分片送检（ADR-006，2026-09-14 落地）
+
+| 项 | 值 |
+|---|---|
+| 分片粒度 | `config.yaml → lip.chunk_ms`（默认 1000ms；16k 单声道 PCM16 = 32 字节/ms） |
+| 尾片阈值 | `lip.min_tail_ms`（默认 200ms；短于此不单独推理） |
+| 语义 | 音频一到就按片送推理，**不等整句合成完**（SPEC §2.1 v1.3 已据此修订） |
+| 服务 URL | **必须 `127.0.0.1`**，禁止 `localhost`（踩坑 20） |
+| 诊断日志 | 设 `LIP_DEBUG=1` 启动后端，会打印每片的派发/返回时刻与 HTTP 耗时 |
+| 效果 | 首片段偏差 +5274ms → **+205ms**；后续片段**全部提前到达**（负值=排队等播，即同步） |
+| 待验 | 真实云 GPU 上单片生成耗时必须 < 1000ms，否则队列积压（**开机后头号补测项**） |
 
 ## 4. 模型与下载源
 

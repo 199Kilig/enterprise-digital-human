@@ -20,6 +20,9 @@
 | 延迟 | 端到端 | **1183ms（mean，6 轮；min 977 / max 1407）** | 文本输入→首个 tts_audio（不含 ASR/口型）；PRD 目标 <2s（首包口径）→ 达标（V-06，2026-09-14） | 本机 | eval/reports/e2e_latency.json |
 | 延迟 | 端到端（流水线 A/B 归因） | **流水线净收益 45.8ms**（重叠窗口 A 45.8ms vs B -0.3ms） | 同批问题 6 轮 A/B：overlap=true vs false；端到端表面差 158ms 中 143ms 是 LLM 侧波动，**不可归因于优化**（2026-09-14） | 本机 | eval/reports/e2e_latency_pipelined.json / _serial.json |
 | 音画同步 | 时差 | 待测 | 音频能量 vs 口型运动互相关（V-05） | 本机 | eval/reports/sync_measure.json |
+| 音画同步 | 口型片段到达偏差（整句送检，**改造前**） | 首片 **+5274ms**；均值 +999ms，最大 +17171ms（3 句回答） | `late_ms = 片段到达时的音频时钟 − start_ms`；正=晚到。**两个真因：`localhost` 解析 2s + 等整句合成完**（2026-09-14） | 本机（假口型服务） | eval/verify_lip_sync.py |
+| 音画同步 | 口型片段到达偏差（按 1s 分片送检，**改造后**） | 首片 **+205ms**；后续 13/13 片**全部提前到达**（−442 ~ −7498ms） | 同一问题同口径；负值=提前到达，前端按 `start_ms` 排队即同步（ADR-006，2026-09-14） | 本机（假口型服务） | eval/verify_lip_sync.py |
+| 延迟 | 本机 `localhost` 名字解析开销 | **~2030 ms/次**（`127.0.0.1` 对照 3~6ms） | 四组对照：requests/urllib × localhost/127.0.0.1，各 3 次（2026-09-14） | 本机 | eval/probe_call_path.py |
 | 音画同步 | 打断响应 | 待测 | 插话→数字人停止（V-06 + T4 条目） | 云 GPU | eval/reports/interrupt_measure.json |
 | 质量 | 口型人工评分 | 待测 | 1-5 分，固定抽查 5 条（见 EVAL-测试集定义 §4.1） | 人工 | eval/reports/quality_score.json |
 | 稳定性 | 连续对话时长 | 待测 | 30 分钟不掉帧（P4 压测） | 云 GPU | eval/reports/stability.json |

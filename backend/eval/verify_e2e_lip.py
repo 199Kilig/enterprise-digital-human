@@ -19,6 +19,12 @@ from pathlib import Path
 import requests
 from PIL import Image
 
+# 中文 Windows 控制台默认 GBK：本脚本输出含 ✅/⚠️，直接 print 会抛 UnicodeEncodeError
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+except Exception:  # noqa: BLE001
+    pass
+
 BASE = "http://127.0.0.1:8010/api/v1"
 QUESTION = sys.argv[1] if len(sys.argv) > 1 else "运费怎么算"
 

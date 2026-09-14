@@ -20,6 +20,15 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+# 中文 Windows 控制台默认 GBK，本文件启动横幅含 ⚠️（U+26A0），直接 print 会抛
+# UnicodeEncodeError 导致服务当场退出（已实测复现）。这里显式转 UTF-8，
+# 配合 .bat 里的 chcp 65001 可正常显示；errors="replace" 保证任何环境都不崩。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+except Exception:  # noqa: BLE001 — 老 Python 或无 reconfigure 时忽略
+    pass
+
 CANNED = Path(__file__).resolve().parent / "reports" / "media" / "lip_demo_8s_crf26.mp4"
 FPS = 25
 

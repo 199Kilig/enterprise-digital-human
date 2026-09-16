@@ -239,6 +239,19 @@ python backend/eval/verify_e2e_lip.py "运费怎么算"
    不重开就永远检测不到插话（FR-06 会退化成"只有手动按钮"）；但**不能上行音频**，
    否则数字人自己的声音会被当成用户说话送进 ASR。打断判据 `max(底噪×8, 0.03)` + **连续 2 帧（200ms）去抖**
    ——RMS 修好后瞬态会命中瞬时判据，单帧触发就会误打断。
+28. **改完后端要确认"进程真的重启了"**（2026-09-15 踩）：`Stop-Process` 杀的是 `netstat` 查到的
+   LISTENING PID，一旦没杀干净，**旧进程仍占着 8010** → 新进程静默启动失败 → 你以为测的是新代码，
+   实际请求全打进了旧进程（症状极像"代码改了但行为没变"，会把人带进错误方向）。
+   本机实测：一次打断端到端验证 FAIL（打断后仍收到 173 条 tts_audio），排查下来根因就是旧进程没死；
+   同日重起后同脚本 **PASS**（打断后 tts_audio 0 条、流 5ms 结束）。
+   **判定方法（唯一可靠）**：让后端日志落文件，看这次请求有没有被记录下来：
+   ```bash
+   cd backend && PYTHONPATH=src .venv/Scripts/python.exe -m uvicorn api.routes:app \
+     --host 127.0.0.1 --port 8010 > "$LOCALAPPDATA/Temp/dh_backend.log" 2>&1 &
+   grep "chat/stream" "$LOCALAPPDATA/Temp/dh_backend.log"   # 应能看到你自己刚发的请求
+   ```
+   确认监听者：`netstat -ano | grep ":8010" | grep -i listening`。
+
 27. **听不见自己的声音 ≠ 没有回声风险**：判据只认「有声音」，离线实测外放音频命中判据 37 帧、触发 17 次。
    能否自打断**完全取决于浏览器 AEC**（`getUserMedia({echoCancellation:true})`），必须真机实测
    （报告 §5 第 4 项），离线试验给不出结论。

@@ -37,6 +37,7 @@
 | 资源 | 云↔本机通道带宽 | **0.96 MB/s 下行 / 0.46 MB/s 上行** | 20 MB 文件实测 SSH 隧道；对比实例原生公网 6.6~18 MB/s（2026-09-14） | 本机↔云 | eval/reports/lip_service_check.md |
 | 延迟 | 口型端到端（服务进程内） | **9175 ms / RTF 1.115**（8s 音频 200 帧） | 生成+融合串行；冷启动首请求 RTF 2.78（含 cuDNN autotune），稳态 RTF 1.08（2026-09-14） | 云 GPU（AutoDL 4090 24G） | eval/reports/lip_service_check.md |
 | 2026-09-14 | 端到端（含口型链路） | **口型首帧 32376 ms**；TTS 首次出声 1234 ms | 真实提问「运费怎么算」SSE 全链路，184 帧/7.3s 语音；**瓶颈为隧道传输 0.96MB/s**，非推理（2026-09-14） | 本机 + 云 GPU | eval/verify_e2e_lip.py |
+| 2026-09-15 | 音画同步 | 打断（**真实链路端到端**：SSE 停止产出） | interrupt → 流结束 **5 ms**；打断后 `tts_audio` **0 条**；未收到 `done` | 真实 DeepSeek + CosyVoice；首片音频到达（1.999s）即插话打断；`eval/verify_interrupt_e2e.py` | 本机 | backend/eval/verify_interrupt_e2e.py |
 | 2026-09-15 | 延迟 | 打断（**后端侧分量**） | **median 4.43ms / p95 6.2ms / max 15.5ms**（50 次） | `POST /session/{id}/interrupt` → 状态机 SPEAKING→INTERRUPTED 完成；**ASGI 内存直连**，不含前端 VAD 帧延迟与网络往返 → 端到端打断响应**仍待人工实测** | 本机 | backend/eval/reports/interrupt_path.json |
 | 2026-09-15 | 延迟 | ASR 端点阈值余量（离线标定，**非真实麦克风**） | 底噪 **≤0.011 正常收尾**；**0.015 时端点永不触发**（用户说完数字人不响应） | 复现前端判定逻辑（`SILENCE_RMS=0.012`/`SILENCE_MS=1200`）+ node 忠实执行 `mic-processor.js`；合成均匀底噪 | 本机 | backend/eval/reports/asr_endpoint_calibration.json |
 | 2026-09-15 | 质量 | 前端 worklet RMS 口径（一致性校验） | **worklet/理论整帧 RMS = 0.993~1.000**（修正前 0.814；瞬态场景 0.308 → **0.998**） | node 忠实执行 `mic-processor.js` 原文件 vs Python 整帧窗口 RMS，9 场景逐一对拍 | 本机 | backend/eval/reports/asr_endpoint_calibration.json |

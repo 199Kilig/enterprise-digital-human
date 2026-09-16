@@ -258,7 +258,10 @@ T=300   VAD 确认打断 → 触发 INTERRUPTED
 ### 4.4 实现检查清单
 
 - □ `api/state_machine.py` 实现状态转移表（§4.1）
-- □ TTS 模块支持 `stop()` 方法：停止迭代 + 清空内部音频缓冲
+- [x] TTS / Lip / Brain 停止产出（2026-09-15 实现，机制与设计不同但语义等价）：
+  未在各模块内实现 `stop()`，而是**在编排层收口**——`/interrupt` 置位 `SessionContext.stop_requested`，
+  `chat_stream` 生成器每轮循环检查到即 `break`，`finally` 里取消 llm/tts/lip 三个 task（取消即停止迭代、
+  相当于各段的 stop()）。理由：三个 task 的生命周期本来就由生成器持有，模块内加 stop() 会引入跨层状态。
 - □ Lip 模块支持 `stop()` 方法：
   - 立即停止接收新的 TTS 分片（阻止新推理入队）
   - 标记当前正在进行的 GPU 推理为"待丢弃"，返回后不发送
@@ -270,8 +273,13 @@ T=300   VAD 确认打断 → 触发 INTERRUPTED
   但该模式**不上行 ASR**，后端拿不到插话音频，缓冲仍无从谈起 → 等在线链路（WebRTC DataChannel，SPEC §4.4）
   跑通后再评估：若届时前端在打断瞬间把已采集的音频补送给后端，本机制才有意义。
   详见 `PROGRESS-2026-09-15-实时链路接入与口型上云.md` 阻塞节。
-- □ 前端播放器支持 `onInterrupted()`：停止接收新分片 + 当前分片播完 + 清空队列 + 发送 `interrupt_done`
-- □ 后端在 `INTERRUPTED` 状态时，忽略新的打断信号
+- [x] 前端播放器 `onInterrupted()`（2026-09-15 实现）：`stopPlayback()` 对 Web Audio 播放链做 **20ms 淡出**后
+  `stop()` 所有已排期分片 + 关闭 AudioContext（等效"当前分片播完、清空队列"，且更快、不产生截断爆音）；
+  同时 `resetLip()` 停口型、`closeRef()` 关 SSE，再调 `/interrupt` 与 `/interrupt_done`。
+  ⚠️ 播放用的是**排到时间轴**的 `AudioBufferSourceNode`，不显式 `stop()` 就会继续播完——
+  这正是"插话了数字人还在说"的直接原因。
+- [x] 后端在 `INTERRUPTED` 状态时忽略新的打断信号（2026-09-15 起对外可区分：返回 `{"status":"ignored"}`，
+  修复前同样返回 `interrupted`，前端无法判断本轮打断是否生效）
 - □ 单元测试：状态转移各路径覆盖（含边界条件）
 
 ------

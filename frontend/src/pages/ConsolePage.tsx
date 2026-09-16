@@ -65,10 +65,13 @@ export default function ConsolePage() {
   const [micLevel, setMicLevel] = useState(0)
   const micCbRef = useRef<MicCallbacks | null>(null)
   const bargeAtRef = useRef(0)
-  const { recording, start: startMic, stop: stopMic } = useMicCapture(
-    session?.session_id ?? null,
-    micCbRef,
-  )
+  const {
+    recording,
+    monitoring,
+    start: startMic,
+    stop: stopMic,
+    stopMonitor,
+  } = useMicCapture(session?.session_id ?? null, micCbRef)
 
   /** 音频时钟（ms，相对本轮回答起点）：口型片段的排期基准（SPEC §3.5 2b） */
   const audioClockMs = useCallback(() => {
@@ -300,6 +303,15 @@ export default function ConsolePage() {
       onError: (m) => setError(m),
     }
   })
+
+  // FR-06 自动打断：数字人播报期间保持麦克风监听（barge 模式，只跑 VAD、不上行音频）。
+  // 为什么必须单独开一路：对话采集在静音端点后即释放音轨，不重新监听就永远采集不到插话，
+  // 自动打断会退化成"只有手动按钮"（见 PROGRESS-2026-09-15 的阻塞节）。
+  // 监听期间必须不上行音频，否则数字人自己的声音会被当成用户说话送进 ASR。
+  useEffect(() => {
+    if (state === 'speaking' && !recording) void startMic('barge')
+    else if (monitoring) void stopMonitor()
+  }, [state, recording, monitoring, startMic, stopMonitor])
 
   return (
     <div className="stack">

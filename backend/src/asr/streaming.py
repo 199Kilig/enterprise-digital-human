@@ -13,6 +13,7 @@ VAD/端点归属见 ADR-004：P1 由前端 AudioWorklet 做（含打断），后
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -23,9 +24,13 @@ from schemas import AsrChunk
 SAMPLE_RATE = 16000
 CHUNK_SIZE = [0, 10, 5]
 CHUNK_STRIDE = CHUNK_SIZE[1] * 960  # 9600 样本 = 600ms
+CHUNK_MS = CHUNK_STRIDE * 1000 // SAMPLE_RATE  # 600ms：时间戳换算基准（SPEC §2 start_ms/end_ms）
 ENC_LOOK_BACK = 4
 DEC_LOOK_BACK = 1
 MODEL_NAME = "paraformer-zh-streaming"
+# SPEC §6：ASR_TIMEOUT = 单块识别 >3s。实测单块 166ms（CPU RTF 0.27），余量充足；
+# 冷启动后首个请求可能触发（RUNBOOK 坑 8：演示前先预热一次 /api/v1/asr/chunk）。
+ASR_TIMEOUT_S = 3.0
 
 
 class AsrError(Exception):
@@ -97,6 +102,7 @@ class StreamingAsr:
         if samples.size:
             self.state.pending = np.concatenate([self.state.pending, samples])
 
+        first_idx = self.state.chunks  # 本次增量处理的第一个分块序号（时间戳基准）
         produced = ""
         while self.state.pending.size >= CHUNK_STRIDE:
             piece = self.state.pending[:CHUNK_STRIDE]
@@ -110,16 +116,21 @@ class StreamingAsr:
 
         if produced:
             self.state.text += produced
+        # 时间戳语义（SPEC §2）：本次**增量文本**在用户语音流中的时间窗。
+        # 一次 push 可能送出多块（大分片到达时），窗口必须覆盖本次处理的全部分块——
+        # 修正前只标「最后一块」的窗口，多块时与增量起点不符。
         return AsrChunk(
             text=produced,
             is_final=is_last,
-            start_ms=(self.state.chunks - 1) * 600 if self.state.chunks else 0,
-            end_ms=self.state.chunks * 600,
+            start_ms=first_idx * CHUNK_MS,
+            end_ms=self.state.chunks * CHUNK_MS,
             confidence=0.0,
         )
 
     def _generate(self, samples: np.ndarray, is_final: bool) -> str:
+        # 注意：get_model() 的懒加载（首次 ~22s）不计入超时——那是加载成本，不是识别成本
         model = get_model()
+        t0 = time.perf_counter()
         try:
             res = model.generate(
                 input=samples,
@@ -131,7 +142,17 @@ class StreamingAsr:
             )
         except Exception as exc:  # noqa: BLE001
             raise AsrError("ASR_ERROR", f"识别失败: {type(exc).__name__}: {exc}") from exc
+        elapsed = time.perf_counter() - t0
         self.state.chunks += 1
+        if elapsed > ASR_TIMEOUT_S:
+            # 事后判定而非中断：FunASR 推理是同步阻塞调用，强杀线程会破坏模型内部状态
+            # （与 DESIGN-打断 §3.3「GPU 在途推理不取消」同理）。此时 cache 已被本次调用改写，
+            # 调用方（routes）收到 ASR_TIMEOUT 会丢弃该会话的流式状态。
+            raise AsrError(
+                "ASR_TIMEOUT",
+                f"单块识别耗时 {elapsed * 1000:.0f}ms 超过 {ASR_TIMEOUT_S * 1000:.0f}ms"
+                f"（冷启动或 CPU 抢占？建议先预热一次 /api/v1/asr/chunk）",
+            )
         self.state.started = True
         if not res:
             return ""

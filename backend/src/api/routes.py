@@ -125,6 +125,11 @@ def interrupt(session_id: str) -> dict:
     except StateMachineError:
         # 转移表未定义该转移（如 LISTENING/THINKING 阶段收到打断）：对外幂等忽略
         return {"status": "ignored", "state": machine.state.value}
+    if not actions:
+        # 转移表定义了该转移但 allow=False（INTERRUPTED 期间重复收到打断）：
+        # 状态不转移、无动作下发。**必须与"打断成功"区分开**，否则前端无法判断
+        # 本轮打断是否真的生效（DESIGN-打断 §4.1 ❌ 行；由 tests/test_interrupt_path.py 锁住）
+        return {"status": "ignored", "state": machine.state.value}
     ctx.state = new_state
     ctx.last_active = _now()
     return {"status": "interrupted" if new_state is SessionState.INTERRUPTED else new_state.value}

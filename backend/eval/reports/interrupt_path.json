@@ -1,0 +1,20 @@
+[
+  {
+    "date": "2026-09-15",
+    "runs": 50,
+    "scope": "ASGI 内存直连：后端收到打断信号 → 状态转移完成（不含前端 VAD 与网络）",
+    "budget_ms_prd": 200,
+    "interrupt": {
+      "n": 50,
+      "median_ms": 4.43,
+      "p95_ms": 6.2,
+      "max_ms": 15.51
+    },
+    "interrupt_done": {
+      "n": 50,
+      "median_ms": 4.29,
+      "p95_ms": 5.52,
+      "max_ms": 7.29
+    }
+  }
+]

@@ -1,0 +1,345 @@
+{
+  "date": "2026-09-15",
+  "voice_wav": "t1-01.wav",
+  "echo_wav": "t3-01.wav",
+  "mic_js": "frontend\\public\\worklets\\mic-processor.js",
+  "thresholds": {
+    "legacy": {
+      "silence_rms": 0.012,
+      "barge": 0.036000000000000004,
+      "debounce": 1
+    },
+    "target": {
+      "floor_min": 0.004,
+      "floor_mult": 3.0,
+      "barge_mult": 8.0,
+      "barge_min": 0.03,
+      "debounce": 2
+    }
+  },
+  "rms_consistency_worklet_over_theory": [
+    0.9996,
+    0.9996,
+    0.9997,
+    0.9997,
+    0.9996,
+    0.9995,
+    0.9976,
+    0.9934,
+    0.9998
+  ],
+  "results": [
+    {
+      "id": "clean",
+      "desc": "底噪0.002 + 语音 + 2.5s尾静音",
+      "note": "基线：应正常收尾",
+      "spans": [
+        [
+          0.49,
+          1.94
+        ]
+      ],
+      "rms_consistency": 0.9996,
+      "legacy": {
+        "endpoint_ms": 3200,
+        "barge_frames": 12,
+        "barge_triggers": 12,
+        "frames": 51,
+        "floor_est": 0.012,
+        "rms_mean": 0.03521,
+        "rms_max": 0.25699,
+        "barge_ratio": 0.235,
+        "verdict": "OK"
+      },
+      "target": {
+        "endpoint_ms": 3200,
+        "barge_frames": 13,
+        "barge_triggers": 6,
+        "frames": 51,
+        "floor_est": 0.00195,
+        "rms_mean": 0.03521,
+        "rms_max": 0.25699,
+        "barge_ratio": 0.255,
+        "verdict": "OK"
+      }
+    },
+    {
+      "id": "floor_0.006",
+      "desc": "底噪0.006",
+      "note": "中等噪声：",
+      "spans": [
+        [
+          0.49,
+          1.93
+        ]
+      ],
+      "rms_consistency": 0.9996,
+      "legacy": {
+        "endpoint_ms": 3200,
+        "barge_frames": 12,
+        "barge_triggers": 12,
+        "frames": 51,
+        "floor_est": 0.012,
+        "rms_mean": 0.03802,
+        "rms_max": 0.25703,
+        "barge_ratio": 0.235,
+        "verdict": "OK"
+      },
+      "target": {
+        "endpoint_ms": 3200,
+        "barge_frames": 12,
+        "barge_triggers": 6,
+        "frames": 51,
+        "floor_est": 0.00578,
+        "rms_mean": 0.03802,
+        "rms_max": 0.25703,
+        "barge_ratio": 0.235,
+        "verdict": "OK"
+      }
+    },
+    {
+      "id": "floor_0.011",
+      "desc": "底噪0.011（紧贴旧阈值0.012）",
+      "note": "临界环境",
+      "spans": [
+        [
+          0.49,
+          1.93
+        ]
+      ],
+      "rms_consistency": 0.9997,
+      "legacy": {
+        "endpoint_ms": 3200,
+        "barge_frames": 12,
+        "barge_triggers": 12,
+        "frames": 51,
+        "floor_est": 0.012,
+        "rms_mean": 0.04165,
+        "rms_max": 0.25716,
+        "barge_ratio": 0.235,
+        "verdict": "OK"
+      },
+      "target": {
+        "endpoint_ms": 3200,
+        "barge_frames": 11,
+        "barge_triggers": 5,
+        "frames": 51,
+        "floor_est": 0.01071,
+        "rms_mean": 0.04165,
+        "rms_max": 0.25716,
+        "barge_ratio": 0.216,
+        "verdict": "OK"
+      }
+    },
+    {
+      "id": "floor_0.015",
+      "desc": "底噪0.015（>旧阈值）",
+      "note": "legacy 下端点永不触发；target 应恢复",
+      "spans": [
+        [
+          0.49,
+          1.92
+        ]
+      ],
+      "rms_consistency": 0.9997,
+      "legacy": {
+        "endpoint_ms": null,
+        "barge_frames": 13,
+        "barge_triggers": 13,
+        "frames": 51,
+        "floor_est": 0.012,
+        "rms_mean": 0.04469,
+        "rms_max": 0.25708,
+        "barge_ratio": 0.255,
+        "verdict": "NO_ENDPOINT"
+      },
+      "target": {
+        "endpoint_ms": 3200,
+        "barge_frames": 10,
+        "barge_triggers": 4,
+        "frames": 51,
+        "floor_est": 0.012,
+        "rms_mean": 0.04469,
+        "rms_max": 0.25708,
+        "barge_ratio": 0.196,
+        "verdict": "OK"
+      }
+    },
+    {
+      "id": "pause_1.0s",
+      "desc": "语音中插 1.0s 静音（<1.2s）",
+      "note": "句中停顿：不应断句",
+      "spans": [
+        [
+          0.49,
+          1.46
+        ],
+        [
+          2.45,
+          2.94
+        ]
+      ],
+      "rms_consistency": 0.9996,
+      "legacy": {
+        "endpoint_ms": 4200,
+        "barge_frames": 12,
+        "barge_triggers": 12,
+        "frames": 61,
+        "floor_est": 0.012,
+        "rms_mean": 0.02998,
+        "rms_max": 0.25694,
+        "barge_ratio": 0.197,
+        "verdict": "OK"
+      },
+      "target": {
+        "endpoint_ms": 4200,
+        "barge_frames": 13,
+        "barge_triggers": 6,
+        "frames": 61,
+        "floor_est": 0.00194,
+        "rms_mean": 0.02998,
+        "rms_max": 0.25694,
+        "barge_ratio": 0.213,
+        "verdict": "OK"
+      }
+    },
+    {
+      "id": "pause_1.5s",
+      "desc": "语音中插 1.5s 静音（>1.2s）",
+      "note": "设计上会断句（切句代价，记录）",
+      "spans": [
+        [
+          0.49,
+          1.46
+        ],
+        [
+          2.95,
+          3.44
+        ]
+      ],
+      "rms_consistency": 0.9995,
+      "legacy": {
+        "endpoint_ms": 2700,
+        "barge_frames": 12,
+        "barge_triggers": 12,
+        "frames": 66,
+        "floor_est": 0.012,
+        "rms_mean": 0.02786,
+        "rms_max": 0.25687,
+        "barge_ratio": 0.182,
+        "verdict": "SHORT_TAIL"
+      },
+      "target": {
+        "endpoint_ms": 2700,
+        "barge_frames": 13,
+        "barge_triggers": 6,
+        "frames": 66,
+        "floor_est": 0.00195,
+        "rms_mean": 0.02786,
+        "rms_max": 0.25687,
+        "barge_ratio": 0.197,
+        "verdict": "SHORT_TAIL"
+      }
+    },
+    {
+      "id": "transient_50ms",
+      "desc": "底噪中 50ms 强噪声脉冲（键盘/咳嗽）",
+      "note": "检验瞬态是否被当插话",
+      "spans": [],
+      "rms_consistency": 0.9976,
+      "legacy": {
+        "endpoint_ms": 2300,
+        "barge_frames": 1,
+        "barge_triggers": 1,
+        "frames": 40,
+        "floor_est": 0.012,
+        "rms_mean": 0.00547,
+        "rms_max": 0.14141,
+        "barge_ratio": 0.025,
+        "verdict": "OK"
+      },
+      "target": {
+        "endpoint_ms": 2300,
+        "barge_frames": 1,
+        "barge_triggers": 0,
+        "frames": 40,
+        "floor_est": 0.00192,
+        "rms_mean": 0.00547,
+        "rms_max": 0.14141,
+        "barge_ratio": 0.025,
+        "verdict": "OK"
+      }
+    },
+    {
+      "id": "silence_only",
+      "desc": "2s 纯底噪（无人声）",
+      "note": "录音后不说话：1.2s 后收尾属设计",
+      "spans": [],
+      "rms_consistency": 0.9934,
+      "legacy": {
+        "endpoint_ms": 1200,
+        "barge_frames": 0,
+        "barge_triggers": 0,
+        "frames": 20,
+        "floor_est": 0.012,
+        "rms_mean": 0.00199,
+        "rms_max": 0.00204,
+        "barge_ratio": 0.0,
+        "verdict": "OK"
+      },
+      "target": {
+        "endpoint_ms": 1200,
+        "barge_frames": 0,
+        "barge_triggers": 0,
+        "frames": 20,
+        "floor_est": 0.00192,
+        "rms_mean": 0.00199,
+        "rms_max": 0.00204,
+        "barge_ratio": 0.0,
+        "verdict": "OK"
+      }
+    },
+    {
+      "id": "echo_selfplay",
+      "desc": "另一段语音模拟「数字人外放被麦克风收到」",
+      "note": "无 AEC 时必然命中打断判据（离线不可验 AEC）",
+      "spans": [
+        [
+          0.48,
+          1.85
+        ],
+        [
+          2.58,
+          3.48
+        ],
+        [
+          4.2,
+          6.02
+        ]
+      ],
+      "rms_consistency": 0.9998,
+      "legacy": {
+        "endpoint_ms": 7200,
+        "barge_frames": 37,
+        "barge_triggers": 37,
+        "frames": 91,
+        "floor_est": 0.012,
+        "rms_mean": 0.05661,
+        "rms_max": 0.24053,
+        "barge_ratio": 0.407,
+        "verdict": "OK"
+      },
+      "target": {
+        "endpoint_ms": 7200,
+        "barge_frames": 37,
+        "barge_triggers": 17,
+        "frames": 91,
+        "floor_est": 0.00194,
+        "rms_mean": 0.05661,
+        "rms_max": 0.24053,
+        "barge_ratio": 0.407,
+        "verdict": "OK"
+      }
+    }
+  ]
+}

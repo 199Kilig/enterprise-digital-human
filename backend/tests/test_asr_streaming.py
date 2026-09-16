@@ -1,6 +1,8 @@
 """ASR 流式模块单测：不加载真实模型（用假模型验证攒块/增量/收尾逻辑）。"""
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pytest
 
@@ -95,3 +97,48 @@ def test_asr_error_wrapped(fake, monkeypatch):
     with pytest.raises(streaming.AsrError) as ei:
         asr.push(_pcm(CHUNK_STRIDE))
     assert ei.value.code == "ASR_ERROR"
+
+
+# ---- 时间戳语义（SPEC §2 start_ms/end_ms = 本次增量在语音流中的时间窗）----
+
+def test_timestamps_cover_all_chunks_in_one_push(fake):
+    """一次 push 送多块时，窗口必须覆盖**全部**块。
+
+    修正前只标「最后一块」的窗口（(chunks-1)*600 → chunks*600），
+    前端一次补发 2 块（如 1.2s 分片）时会标成 600~1200ms，与增量文本起点不符。
+    """
+    asr = StreamingAsr()
+    chunk = asr.push(_pcm(CHUNK_STRIDE * 2))
+    assert (chunk.start_ms, chunk.end_ms) == (0, 1200)
+
+
+def test_timestamps_continue_across_pushes(fake):
+    asr = StreamingAsr()
+    asr.push(_pcm(CHUNK_STRIDE))
+    chunk = asr.push(_pcm(CHUNK_STRIDE))
+    assert (chunk.start_ms, chunk.end_ms) == (600, 1200)
+
+
+# ---- ASR_TIMEOUT（SPEC §6：单块识别 >3s）----
+
+def test_slow_chunk_raises_asr_timeout(monkeypatch, fake):
+    """超时须抛 ASR_TIMEOUT 而非 ASR_ERROR —— 两者的前端处理不同（提示重试 vs 兜底）。"""
+    monkeypatch.setattr(streaming, "ASR_TIMEOUT_S", 0.05)
+
+    def slow(*a, **k):
+        time.sleep(0.15)
+        return [{"text": "慢"}]
+
+    monkeypatch.setattr(fake, "generate", slow)
+    asr = StreamingAsr()
+    with pytest.raises(streaming.AsrError) as ei:
+        asr.push(_pcm(CHUNK_STRIDE))
+    assert ei.value.code == "ASR_TIMEOUT"
+
+
+def test_normal_chunk_does_not_trigger_timeout(fake):
+    """实测单块 166ms vs 阈值 3000ms，不能误报。"""
+    asr = StreamingAsr()
+    chunk = asr.push(_pcm(CHUNK_STRIDE))
+    assert chunk.text == "t1"
+    assert streaming.CHUNK_MS == 600

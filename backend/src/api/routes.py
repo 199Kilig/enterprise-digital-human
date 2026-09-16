@@ -132,6 +132,10 @@ def interrupt(session_id: str) -> dict:
         return {"status": "ignored", "state": machine.state.value}
     ctx.state = new_state
     ctx.last_active = _now()
+    # 真正让数字人闭嘴：置位后 chat_stream 的生成器会停止产出 token / TTS / 口型。
+    # 之前这里只改状态、把状态机返回的动作（ACT_EMIT_INTERRUPTED / ACT_CLEANUP_PIPELINE）丢掉，
+    # 结果"打断"只有状态变了、音频照样放完 → 用户感受是"打不断"。
+    ctx.stop_requested = True
     return {"status": "interrupted" if new_state is SessionState.INTERRUPTED else new_state.value}
 
 
@@ -146,6 +150,7 @@ def interrupt_done(session_id: str) -> dict:
         return {"status": "ignored", "state": machine.state.value}
     ctx.state = new_state
     ctx.last_active = _now()
+    ctx.stop_requested = False  # 清理完成，为新轮次复位
     return {"status": "cleaned", "session_id": session_id}
 
 
@@ -232,10 +237,13 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
 
     async def gen():
         t0 = time.perf_counter()
+        ctx.stop_requested = False  # 新一轮：复位打断标志（上一轮已由 /interrupt_done 收尾）
 
         if not text:
             yield _sse("thinking", {"state": "thinking", "timestamp_ms": 0})
-            yield _sse("done", {"total_seq_audio": 0, "total_seq_lip": 0, "duration_ms": 0})
+            # placeholder=true：这是"没带 text 的空跑流"（如前端 SSE 自动重连），
+            # 不是一轮真实回答。前端据此忽略，避免把空 done 当成一轮结果处理。
+            yield _sse("done", {"total_seq_audio": 0, "total_seq_lip": 0, "duration_ms": 0, "placeholder": True})
             return
 
         # ---- 1) 用户语音端点（文本等价）→ THINKING，走真实转移表 ----
@@ -404,6 +412,10 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
         lip_done = not _LIP_ON
         try:
             while not (token_done and audio_done and lip_done):
+                # 打断检查：/interrupt 置位后立即停止产出（不再收 token / 合成 TTS / 送口型）。
+                # 放在循环最前，是为了让打断的最坏延迟 = 一次循环周期（5ms），而不是等本轮跑完。
+                if ctx.stop_requested:
+                    break
                 # 文字优先下发：保证"边收边显示"跟手，不被合成阻塞
                 while not token_done:
                     try:
@@ -508,6 +520,12 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
             for task in (llm_task, tts_task, lip_task):
                 if task is not None and not task.done():
                     task.cancel()
+
+        if ctx.stop_requested:
+            # 被打断：**不发 done**。状态机此刻是 INTERRUPTED，若继续往下走
+            # TTS_LIP_DONE 转移会抛错并被 reset 成 LISTENING，反而破坏打断流程
+            # （INTERRUPTED → LISTENING 只能由 /interrupt_done 驱动）。
+            return
 
         # ---- 3) 错误与收尾 ----
         llm_err = llm_info["error"]

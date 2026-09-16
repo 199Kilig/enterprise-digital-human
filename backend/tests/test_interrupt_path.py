@@ -111,6 +111,37 @@ def test_interrupt_unknown_session_returns_404(client: TestClient) -> None:
     assert r.json()["detail"]["code"] == "SESSION_NOT_FOUND"
 
 
+def test_interrupt_sets_stop_requested_flag(client: TestClient) -> None:
+    """打断必须**真的置位 `stop_requested`** —— 这才是"让数字人闭嘴"的开关。
+
+    修复前：`/interrupt` 只改状态机状态，状态机返回的动作被丢弃，进行中的 SSE 生成器
+    没有任何停止依据 → 整轮 token/TTS 照旧发完，前端播放队列照旧播完
+    → 用户感受"数字人说话时打不断"。
+    """
+    sid = _new_session(client)
+    _drive_to_speaking(sid)
+    assert mod._sessions[sid].stop_requested is False
+
+    client.post(f"/api/v1/session/{sid}/interrupt")
+    assert mod._sessions[sid].stop_requested is True, "打断未置位：生成器不会停"
+
+    client.post(f"/api/v1/session/{sid}/interrupt_done")
+    assert mod._sessions[sid].stop_requested is False, "清理完成应复位，否则下一轮一开口就被打断"
+
+
+def test_placeholder_stream_marks_done_placeholder(client: TestClient) -> None:
+    """无 `text` 的空跑流必须标 `placeholder`。
+
+    为什么关键：前端 SSE 断线时浏览器会**自动重连**，而重连请求不带 text
+    → 后端返回这条占位流（thinking + done，无 answer）→ 前端若按普通一轮处理，
+    answer 为空就什么都不追加 → 用户看到"这一轮回复凭空消失"。
+    """
+    sid = _new_session(client)
+    body = client.get("/api/v1/chat/stream", params={"session_id": sid}).text
+    assert "placeholder" in body, f"占位流未标记 placeholder，响应体：{body[:200]}"
+    assert '"placeholder": true' in body.replace("\n", " ") or '"placeholder":true' in body
+
+
 def test_speaking_receives_user_speech_without_interrupt(client: TestClient) -> None:
     """SPEAKING 中收到语音分片但 VAD 未触发打断：状态不变，动作为缓存（DESIGN §4.1 ⚠️ 行）。
 

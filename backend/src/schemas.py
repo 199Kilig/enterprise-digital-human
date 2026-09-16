@@ -78,6 +78,10 @@ class SessionContext:
     history: List[dict] = field(default_factory=list)  # 对话历史 [{role, content}]
     buffer_audio: List[TtsSegment] = field(default_factory=list)  # 待播放 TTS 队列
     buffer_lip: List[LipFrame] = field(default_factory=list)  # 待渲染口型帧队列
+    stop_requested: bool = False
+    # v1.6 新增：打断标志。`POST /session/{id}/interrupt` 置位 → 进行中的 `chat_stream`
+    # SSE 生成器轮询到即停止产出（不再发 token / 合成 TTS / 送口型），置位后不发 done。
+    # 状态机由 /interrupt 与 /interrupt_done 驱动，本标志只负责"让数字人闭嘴"。
 
 
 # ============ 错误响应 ============

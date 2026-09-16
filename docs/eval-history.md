@@ -36,7 +36,13 @@
 | 资源 | 口型传输载荷（H.264 整句片段） | **387 KB / 8s 音频**（同帧逐帧 JPEG 15.52 MB → **41×**） | CRF26 + veryfast，704×1216@25fps；同批帧 ffmpeg 直出实测。**服务内编码路径待云 GPU 复测**（ADR-005 落地日实例已关机） | 云 GPU（AutoDL 4090 24G） | eval/reports/lip_service_check.md |
 | 资源 | 云↔本机通道带宽 | **0.96 MB/s 下行 / 0.46 MB/s 上行** | 20 MB 文件实测 SSH 隧道；对比实例原生公网 6.6~18 MB/s（2026-09-14） | 本机↔云 | eval/reports/lip_service_check.md |
 | 延迟 | 口型端到端（服务进程内） | **9175 ms / RTF 1.115**（8s 音频 200 帧） | 生成+融合串行；冷启动首请求 RTF 2.78（含 cuDNN autotune），稳态 RTF 1.08（2026-09-14） | 云 GPU（AutoDL 4090 24G） | eval/reports/lip_service_check.md |
-| 延迟 | 端到端（含口型链路） | **口型首帧 32376 ms**；TTS 首次出声 1234 ms | 真实提问「运费怎么算」SSE 全链路，184 帧/7.3s 语音；**瓶颈为隧道传输 0.96MB/s**，非推理（2026-09-14） | 本机 + 云 GPU | eval/verify_e2e_lip.py |
+| 2026-09-14 | 端到端（含口型链路） | **口型首帧 32376 ms**；TTS 首次出声 1234 ms | 真实提问「运费怎么算」SSE 全链路，184 帧/7.3s 语音；**瓶颈为隧道传输 0.96MB/s**，非推理（2026-09-14） | 本机 + 云 GPU | eval/verify_e2e_lip.py |
+| 2026-09-15 | 延迟 | 打断（**后端侧分量**） | **median 4.43ms / p95 6.2ms / max 15.5ms**（50 次） | `POST /session/{id}/interrupt` → 状态机 SPEAKING→INTERRUPTED 完成；**ASGI 内存直连**，不含前端 VAD 帧延迟与网络往返 → 端到端打断响应**仍待人工实测** | 本机 | backend/eval/reports/interrupt_path.json |
+| 2026-09-15 | 延迟 | ASR 端点阈值余量（离线标定，**非真实麦克风**） | 底噪 **≤0.011 正常收尾**；**0.015 时端点永不触发**（用户说完数字人不响应） | 复现前端判定逻辑（`SILENCE_RMS=0.012`/`SILENCE_MS=1200`）+ node 忠实执行 `mic-processor.js`；合成均匀底噪 | 本机 | backend/eval/reports/asr_endpoint_calibration.json |
+| 2026-09-15 | 质量 | 前端 worklet RMS 口径（一致性校验） | **worklet/理论整帧 RMS = 0.993~1.000**（修正前 0.814；瞬态场景 0.308 → **0.998**） | node 忠实执行 `mic-processor.js` 原文件 vs Python 整帧窗口 RMS，9 场景逐一对拍 | 本机 | backend/eval/reports/asr_endpoint_calibration.json |
+| 2026-09-15 | 音画同步 | 打断判据去抖（离线） | 瞬态场景：命中 1 帧 / **触发 0 次**（legacy 1 次）；回声场景：37 帧 → **17 次** | legacy（固定 0.036 单帧）vs target（`max(底噪×8,0.03)` 连续 2 帧） | 本机 | 同上 |
+| 2026-09-15 | 延迟 | ASR 端点阈值自适应（修复效果） | **底噪 0.015 场景：无端点 → 3.1s 正常收尾**；其余 6 场景无回归 | 离线标定脚本三列对照（固定阈值 / 自适应 / 100ms 窗口 RMS）；阈值 = max(底噪×3, 0.004) | 本机 | backend/eval/reports/asr_endpoint_calibration.json |
+| 2026-09-15 | 音画同步 | 打断判据命中率（离线） | 用户语音 **23.5%** 帧命中；**模拟数字人外放 33.0%** 帧命中 | 判据 `rms > 0.036` 的命中帧占比；外放用另一段测试集音频代替 → 判据本质是"有声音检测"，**不是插话检测**，AEC 是其成立前提 | 本机 | 同上 |
 | 资源 | GPU 小时成本 | 待测 | 按周累计（PRD §4 风险） | — | 成本台账（记账本） |
 
 > 登记规则：V 脚本跑出数字后，把"数值"列从"待测"改成实测值，并在"日期"列登记；一行只记一次实测（新实测覆盖旧值时保留旧值行，追加新行，不覆盖历史）。

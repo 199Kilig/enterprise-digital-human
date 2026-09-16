@@ -3,7 +3,7 @@ title: 打断时序与状态机转移设计
 type: design
 status: completed
 date: 2026-09-01
-updated: 2026-09-01
+updated: 2026-09-15
 links: [./DESIGN-实时交互链路架构.md, ./SPEC-接口与协议规范.md, ../03-决策/ADR-004-VAD归属.md]
 ---
 # 《打断时序与状态机转移表》完整版
@@ -216,11 +216,11 @@ sequenceDiagram
 | 当前状态      | 触发事件                          | 目标状态      | 动作                                                         | 是否允许 |
 | :------------ | :-------------------------------- | :------------ | :----------------------------------------------------------- | :------- |
 | `LISTENING`   | ASR 端点（`is_final=True`）       | `THINKING`    | 发送用户完整文本到 Brain                                     | ✅        |
-| `LISTENING`   | 用户静音超时（>2s）               | `THINKING`    | 同 ASR 端点（兜底）                                          | ✅        |
+| `LISTENING`   | 用户静音超时（前端 VAD，1.2s；**静音阈值自适应**，ADR-004） | `THINKING`    | 同 ASR 端点（兜底）                                          | ✅        |
 | `THINKING`    | LLM 首 token 返回                 | `SPEAKING`    | 触发 TTS 合成，启动流式输出                                  | ✅        |
 | `THINKING`    | LLM 超时（>1.5s）                 | `SPEAKING`    | 触发**降级话术 TTS**（预设文案："抱歉，我思考了一下，请您再说一遍？"）→ 播完后进入 LISTENING | ✅        |
 | `THINKING`    | LLM 错误                          | `SPEAKING`    | 同超时处理（降级话术）                                       | ✅        |
-| `SPEAKING`    | VAD 打断信号                      | `INTERRUPTED` | 执行 §3.3 规则2 清理协议；发送 SSE `interrupted` 事件          | ✅        |
+| `SPEAKING`    | VAD 打断信号（前端判据：`rms > max(底噪×8, 0.03)` 且**连续 2 帧=200ms**） | `INTERRUPTED` | 执行 §3.3 规则2 清理协议；发送 SSE `interrupted` 事件          | ✅        |
 | `SPEAKING`    | TTS 流结束 + Lip 流结束           | `LISTENING`   | 发送 `done` 事件，等待下一轮                                 | ✅        |
 | `INTERRUPTED` | 收到 `interrupt_done`（清理完成） | `LISTENING`   | 关闭旧 SSE 流（若还在发），打开新流                          | ✅        |
 | `INTERRUPTED` | 收到新的打断信号                  | `INTERRUPTED` | **忽略**，继续保持清理中                                     | ❌        |
@@ -265,7 +265,11 @@ T=300   VAD 确认打断 → 触发 INTERRUPTED
   - 清空已完成的帧缓冲（未发送的丢弃）
   - ⚠️ 不强行中断 CUDA 内核（PyTorch 无安全取消 API）
 - □ Brain 模块支持 `stop()` 方法：停止 LLM 流式生成 + 关闭 SSE 流
-- □ ASR 模块支持 `pre_interrupt_buffer` 机制（§4.3）
+- ⛔ ASR 模块支持 `pre_interrupt_buffer` 机制（§4.3）——**仍未实现（2026-09-15 复核）**：
+  **前端侧已修**：`useMicCapture` 新增 `barge` 模式，播报期间自动开一路只跑 VAD 的采集（不再"没有采集"）。
+  但该模式**不上行 ASR**，后端拿不到插话音频，缓冲仍无从谈起 → 等在线链路（WebRTC DataChannel，SPEC §4.4）
+  跑通后再评估：若届时前端在打断瞬间把已采集的音频补送给后端，本机制才有意义。
+  详见 `PROGRESS-2026-09-15-实时链路接入与口型上云.md` 阻塞节。
 - □ 前端播放器支持 `onInterrupted()`：停止接收新分片 + 当前分片播完 + 清空队列 + 发送 `interrupt_done`
 - □ 后端在 `INTERRUPTED` 状态时，忽略新的打断信号
 - □ 单元测试：状态转移各路径覆盖（含边界条件）
@@ -295,4 +299,5 @@ T=300   VAD 确认打断 → 触发 INTERRUPTED
 | 版本     | 日期           | 变更内容                                                     | 作者 |
 | :------- | :------------- | :----------------------------------------------------------- | :--- |
 | v0.1     | 2026-09-01     | 初稿                                                         | -    |
-| **v1.0** | **2026-09-01** | **定稿：修正GPU推理"停不停"矛盾、LLM超时转移、VAD归属决策、时序图改Mermaid** | -    |
+| **v1.0** | **2026-09-01** | **定稿：修正GPU推理"停不停"矛盾、LLM超时转移、VAD归属决策、时序图改Mermaid** | - |
+| **v1.1** | **2026-09-15** | **口径收口：§4.1 静音超时阈值由「>2s」改为「前端 VAD 当前 1.2s（ADR-004）」，与实现（`useMicCapture.ts SILENCE_MS`）对齐** | - |

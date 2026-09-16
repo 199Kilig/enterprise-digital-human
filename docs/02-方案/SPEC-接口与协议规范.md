@@ -3,7 +3,7 @@ title: 实时交互链路接口与协议规范
 type: spec
 status: completed
 date: 2026-09-01
-updated: 2026-09-01
+updated: 2026-09-15
 links: [./DESIGN-实时交互链路架构.md, ../03-决策/ADR-004-VAD归属.md]
 ---
 # 《接口与协议规范》完整版
@@ -48,9 +48,11 @@ class AsrChunk:
     """语音识别增量输出"""
     text: str                    # 增量识别文本
     is_final: bool = False       # 该分片是否为句尾（端点检测）
-    start_ms: Optional[int] = None  # 本分片在用户语音流中的起始时间
-    end_ms: Optional[int] = None    # 本分片在用户语音流中的结束时间
-    confidence: float = 0.0      # 置信度（0-1），用于调试
+    start_ms: Optional[int] = None  # 本分片在用户语音流中的起始时间 = 本次增量第一个分块的起点
+    end_ms: Optional[int] = None    # 本分片在用户语音流中的结束时间 = 本次增量最后一个分块的终点
+                                    # v1.5 已修：一次 push 送多块时窗口必须覆盖**全部**块；
+                                    #   修正前只标「最后一块」（(chunks-1)*600 → chunks*600）
+    confidence: float = 0.0      # 置信度（0-1），用于调试；P1 实现恒返回 0.0（未启用）
 
 
 # ============ Brain → TTS ============
@@ -308,9 +310,16 @@ POST /api/v1/session
 ```
 POST /api/v1/session/{session_id}/interrupt
 响应: { "status": "interrupted" }
+      { "status": "ignored", "state": "<当前状态>" }   ← 未生效
 ```
 
 等价于 VAD 自动检测触发的打断，后端行为一致。
+
+**两种返回的含义（v1.4 补全）**：
+- `interrupted`：转移生效，本次打断成功（仅 `SPEAKING` 态可能返回）
+- `ignored`：**信号未生效**，携带当前状态。两种情形：① 转移表未定义该转移（`LISTENING`/`THINKING` 态收到打断）；
+  ② 转移表定义但 `allow=False`（`INTERRUPTED` 清理期重复收到打断，见 DESIGN-打断 §4.1 ❌ 行）
+- 前端必须按 `status` 判断本次打断是否生效，**不能只看 HTTP 200**（清理期重复信号返回 200 但未生效）
 
 ### 5.2.1 打断清理确认
 
@@ -339,8 +348,8 @@ DELETE /api/v1/session/{session_id}
 | :------------------ | :------- | :--------------------------- | :----------------------------------- |
 | `SESSION_NOT_FOUND` | 404      | session_id 不存在或已过期    | 重新创建会话                         |
 | `SESSION_CONFLICT`  | 409      | 同一 session 已有活跃连接    | 等待或强制复用                       |
-| `ASR_TIMEOUT`       | 503      | 语音识别超时（>3s）          | 提示用户重试                         |
-| `ASR_ERROR`         | 500      | ASR 模型推理异常             | 兜底提示                             |
+| `ASR_TIMEOUT`       | 503      | 语音识别超时（**单块 >3s**）  | 提示用户重试（v1.5 已实现：`asr/streaming.py ASR_TIMEOUT_S`；事后判定，不中断推理） |
+| `ASR_ERROR`         | 503      | ASR 模型推理异常             | 兜底提示（v1.4 由 500 更正为 503，与实现一致）       |
 | `LLM_TIMEOUT`       | 503      | 大模型首 token >1.5s         | 静默重试一次，仍失败则降级话术       |
 | `LLM_ERROR`         | 500      | 大模型 API 返回异常          | 返回预设话术 + 记录日志              |
 | `TTS_TIMEOUT`       | 503      | 语音合成首包 >1s             | 降级为备用 TTS 或提示                |
@@ -355,7 +364,7 @@ DELETE /api/v1/session/{session_id}
 
 | 环节                      | 超时阈值                       | 超时后行为             |
 | :------------------------ | :----------------------------- | :--------------------- |
-| ASR 连续静音 >2s          | 触发 VAD 端点（is_final=True） | 进入 thinking          |
+| ASR 连续静音（前端 VAD，ADR-004） | 时长 **1.2s**；**静音阈值自适应**：`max(环境底噪×3, 0.004)`，区间 [0.004, 0.036]（v1.6） | 触发 VAD 端点（is_final=True）→ 进入 thinking |
 | LLM 首 token              | 1.5s                           | 重试一次，失败降级     |
 | TTS 首包                  | 1s                             | 降级备用 TTS           |
 | Lip 首帧                  | 500ms                          | 丢帧，继续播音频       |
@@ -371,7 +380,10 @@ DELETE /api/v1/session/{session_id}
 | **v1.0** | **2026-09-01** | **定稿：补 interrupt_done 端点、interrupted 事件、seq 原则修正、错误码统一、DataChannel 二进制传输** | -    |
 | **v1.1** | **2026-09-01** | **勘误：TtsSegment 增 sample_rate 字段、新增 §2.1 lip 推理服务接口、§4.3 分辨率表述修正、§7 端到端口径统一为"首包"** | -    |
 | **v1.2** | **2026-09-14** | **口型传输载体改为 H.264 整句片段：§2.1 响应增 `video_b64`/`duration_ms`/`n_frames`（`frames` 保留为兼容路径）、§3.3 新增 `lip_video` 事件、§3.5 增片段排队播放约定。**依据 ADR-005**（实测跨机链路 0.96MB/s，逐帧 JPEG 16.2s/句 vs H.264 0.39s，41×）** | -    |
-| **v1.3** | **2026-09-14** | **口型改为按音频分片请求：§2.1 语义由"一句一次请求"修订为"每 ~1s 音频分片一次请求"。**依据 ADR-006**（整句送检导致首片段迟到 +5274ms；分片后 +205ms，后续片段全部提前到达）** | -    |
+| **v1.3** | **2026-09-14** | **口型改为按音频分片请求：§2.1 语义由"一句一次请求"修订为"每 ~1s 音频分片一次请求"。**依据 ADR-006**（整句送检导致首片段迟到 +5274ms；分片后 +205ms，后续片段全部提前到达）** | - |
+| **v1.6** | **2026-09-15** | **前端 VAD 三项修复（依据离线标定，证据 `backend/eval/reports/asr_mic_check.md`）**：① §7 静音阈值改为自适应 `max(底噪估计×3, 0.004)`（底噪用只降不升的 min 跟踪器）——固定 0.012 在底噪 ≥0.012 的环境下端点永不触发；② `mic-processor.js` 的帧 RMS 改为**整帧口径**（原实现等价于 ~4ms 窗口，低估 19%、漏检 50ms 瞬态；修正后 worklet/理论一致性 0.993~1.000）；③ 打断判据改为 `max(底噪×8, 0.03)` + **连续 2 帧（200ms）去抖**（RMS 修正后瞬态会命中瞬时判据） | - |
+| **v1.5** | **2026-09-15** | **ASR 实现收口：`ASR_TIMEOUT` 落地（单块 >3s；事后判定而非中断推理——FunASR 同步阻塞，强杀线程会破坏模型状态）；`AsrChunk.start_ms/end_ms` 修正为覆盖本次增量全部分块；§6 去掉 ASR_TIMEOUT「未实现」标注** | - |
+| **v1.4** | **2026-09-15** | **ASR 口径收口（文档与实现对齐）：§7 静音阈值由「>2s」改为「前端标定、当前 1.2s（ADR-004）」；§6 `ASR_ERROR` 由 500 更正为 503、标注 `ASR_TIMEOUT` 未实现；§2 `AsrChunk` 标注 start_ms/end_ms 语义偏差与 confidence 未启用；§5.2 补全 `interrupt` 响应区分 `interrupted`/`ignored`（清理期重复打断原本误报为 interrupted，已修）** | - |
 
 **变更规则**：
 

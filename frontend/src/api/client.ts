@@ -99,6 +99,7 @@ export function openStream(sessionId: string, handlers: SseHandlers, text?: stri
   let url = `${BASE}/chat/stream?session_id=${encodeURIComponent(sessionId)}`
   if (text) url += `&text=${encodeURIComponent(text)}`
   const es = new EventSource(url)
+  let closedByUs = false
 
   es.onopen = () => handlers.onOpen?.()
 
@@ -114,12 +115,20 @@ export function openStream(sessionId: string, handlers: SseHandlers, text?: stri
     })
   }
 
+  // ⚠️ EventSource 默认会**自动重连**，但"一轮对话"是一次性流，重连是有害的：
+  //    重连请求不带 text → 后端返回「占位流」（thinking + done，**done 无 answer**）
+  //    → 前端按 done 处理时空 answer → 静默不追加任何消息
+  //    → 用户看到"这一轮的回复凭空消失"（实测复现的现象之一）。
+  //    因此这里显式关闭并上抛：把"断线"变成可见错误，而不是变成一次假重连。
   es.onerror = () => {
-    // readyState 2 = CLOSED：后端结束流或断开；不把它当致命错误（EventSource 会重连）
-    if (es.readyState === EventSource.CLOSED) {
-      handlers.onError?.({ message: 'SSE 连接已关闭' })
-    }
+    if (closedByUs) return  // 主动关闭（一轮结束）触发的 onerror 不是错误
+    closedByUs = true
+    es.close()
+    handlers.onError?.({ message: 'SSE 连接中断，本轮可能未完成（已停止自动重连）' })
   }
 
-  return () => es.close()
+  return () => {
+    closedByUs = true
+    es.close()
+  }
 }

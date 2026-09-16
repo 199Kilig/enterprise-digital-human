@@ -43,6 +43,8 @@ const SEQ_TYPES: SseEventType[] = ['brain_token', 'tts_audio', 'lip_frame', 'lip
 interface AudioSink {
   ctx: AudioContext
   base: number
+  gain: GainNode // 打断时用它做 20ms 淡出（硬切会产生"咔嗒"爆音）
+  sources: AudioBufferSourceNode[] // 已排期的分片，打断时逐个 stop
 }
 
 export default function ConsolePage() {
@@ -91,7 +93,9 @@ export default function ConsolePage() {
     let sink = audioRef.current
     if (!sink) {
       const ctx = new AudioContext()
-      sink = { ctx, base: ctx.currentTime + 0.15 } // 150ms 起播余量，避免首片被丢弃
+      const gain = ctx.createGain()
+      gain.connect(ctx.destination)
+      sink = { ctx, base: ctx.currentTime + 0.15, gain, sources: [] } // 150ms 起播余量，避免首片被丢弃
       audioRef.current = sink
     }
     const buffer = sink.ctx.createBuffer(1, i16.length, 16000)
@@ -99,8 +103,43 @@ export default function ConsolePage() {
     for (let i = 0; i < i16.length; i++) ch[i] = i16[i] / 32768
     const src = sink.ctx.createBufferSource()
     src.buffer = buffer
-    src.connect(sink.ctx.destination)
+    src.connect(sink.gain) // 经 gain 才可淡出
     src.start(sink.base + startMs / 1000)
+    sink.sources.push(src)
+    src.onended = () => {
+      const k = sink.sources.indexOf(src)
+      if (k >= 0) sink.sources.splice(k, 1)
+    }
+  }, [])
+
+  /**
+   * 打断时立刻停止播放 —— DESIGN-打断 §3.3 规则3 的前端清理协议。
+   *
+   * 为什么必须淡出而不是直接 close：波形被硬切会发出"咔嗒"爆音，停止要干净
+   * （DESIGN 规则3「允许当前分片播完」的用意就是不产生爆音，这里用 20ms 淡出等效且更快）。
+   * 为什么必须显式 stop 已排期的 source：`src.start(base + startMs/1000)` 是**排到时间轴上**的，
+   * 不 stop 就会继续播完 —— 这正是"插话了但数字人还在说"的直接原因。
+   */
+  const stopPlayback = useCallback(() => {
+    const sink = audioRef.current
+    if (!sink) return
+    audioRef.current = null
+    try {
+      const now = sink.ctx.currentTime
+      sink.gain.gain.cancelScheduledValues(now)
+      sink.gain.gain.setValueAtTime(sink.gain.gain.value, now)
+      sink.gain.gain.linearRampToValueAtTime(0, now + 0.02)
+      for (const s of sink.sources) {
+        try {
+          s.stop(now + 0.02)
+        } catch {
+          /* 已自然结束的 source 调 stop 会抛，忽略 */
+        }
+      }
+    } catch {
+      /* 音频上下文异常不应阻塞打断流程 */
+    }
+    window.setTimeout(() => void sink.ctx.close().catch(() => undefined), 80) // 等淡出跑完再关
   }, [])
 
   // 指标（延迟预算 / 产物信息）：全部来自 eval/reports 真实报告
@@ -147,10 +186,7 @@ export default function ConsolePage() {
       seqRef.current = {}
       t0Ref.current = Date.now()
       setAudioStats(null)
-      if (audioRef.current) {
-        void audioRef.current.ctx.close().catch(() => undefined)
-        audioRef.current = null
-      }
+      stopPlayback() // 上一轮若还在播（含打断后残留），先干净停掉
 
       closeRef.current = openStream(
         session.session_id,
@@ -175,7 +211,12 @@ export default function ConsolePage() {
             else if (type === 'brain_token') {
               bufRef.current += String(payload.token ?? '')
               setStreamText(bufRef.current)
-            } else if (type === 'interrupted') setState('interrupted')
+            } else if (type === 'interrupted') {
+              // 后端已确认打断：本地立刻停播 + 停口型（不等 /interrupt 往返）
+              stopPlayback()
+              resetLip()
+              setState('interrupted')
+            }
             else if (type === 'tts_audio') {
               setState('speaking')
               const b64 = String(payload.audio_b64 ?? '')
@@ -216,12 +257,29 @@ export default function ConsolePage() {
             } else if (type === 'error') {
               setState('error')
               setError(`${payload.code}: ${payload.message}`)
+              // 已产出的 token 落成正式消息：否则下一轮 sendTurn 清空 streamText 时它会凭空消失
+              const partial = bufRef.current.trim()
+              if (partial) setMessages((m) => [...m, { role: 'digital', text: partial, at: Date.now() }])
+              setStreamText(null)
+              stopPlayback()
               closeRef.current?.()
             } else if (type === 'done') {
               closeRef.current?.() // 一轮结束即关流，避免 EventSource 自动重连
-              const answer = String(payload.answer ?? bufRef.current)
+              // 占位流（无 text 的空跑 / 断线重连）不是一轮真实回答：直接忽略，别污染消息列表
+              if (payload.placeholder === true) return
+              const answer = String(payload.answer ?? bufRef.current ?? '')
               if (answer) {
                 setMessages((m) => [...m, { role: 'digital', text: answer, at: Date.now() }])
+              } else {
+                // 不能静默：此前 answer 为空时什么都不做 → 用户看到"这一轮凭空消失"（实测现象）
+                setMessages((m) => [
+                  ...m,
+                  {
+                    role: 'system',
+                    at: Date.now(),
+                    text: '本轮无回复（SSE 连接中断或空占位流）—— 若反复出现请看右侧事件表',
+                  },
+                ])
               }
               setStreamText(null)
               const ttft = typeof payload.ttft_ms === 'number' ? payload.ttft_ms : null
@@ -248,11 +306,16 @@ export default function ConsolePage() {
         text,
       )
     },
-    [session],
+    [session, stopPlayback, resetLip],
   )
 
+  /** 打断：本地立刻停播/停口型/关流，再通知后端（DESIGN-打断 §3.3 规则3）。 */
   const handleInterrupt = async () => {
     if (!session) return
+    stopPlayback() // ① 数字人立刻闭嘴，不等后端往返
+    resetLip() // ② 口型片段也停
+    closeRef.current?.() // ③ 关流：不再接收新分片（后端也会因 stop_requested 停止产出）
+    closeRef.current = null
     await api.interrupt(session.session_id).catch((e: Error) => setError(e.message))
     setState('interrupted')
     window.setTimeout(() => {

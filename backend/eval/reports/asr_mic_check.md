@@ -140,7 +140,8 @@ node backend/eval/mic_rms_probe.mjs frontend/public/worklets/mic-processor.js <p
 
 ## 5. 待人工实测清单（必须真浏览器 + 真麦克风，离线无法覆盖）
 
-> 前 4 项是 `asr_endpoint_check.md`「未覆盖」三节的落地。建议逐项记录到 `backend/eval/reports/asr_mic_check.json`。
+> 📋 **照着做请用操作卡**：`backend/eval/reports/asr_mic_runbook.md`（含启动/预热/硬刷新步骤、逐项判据、可粘贴的记录表）。
+> 前 4 项是 `asr_endpoint_check.md`「未覆盖」三节的落地。
 
 | # | 项目 | 步骤 | 判据 |
 |---|---|---|---|

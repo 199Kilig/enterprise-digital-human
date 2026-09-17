@@ -269,6 +269,22 @@ python backend/eval/verify_e2e_lip.py "运费怎么算"
 | 待验 | 真实云 GPU 上单片生成耗时必须 < 1000ms，否则队列积压（**开机后头号补测项**） |
 | 背压 | 2026-09-17 已加：`lip_in_q` 限长（`config.yaml lip.queue_max`，默认 8）+ **满则丢最旧**；`done.lip_dropped` 暴露丢帧数。理由：TTS 合成快于单 GPU 串行推理，无界队列会让片段落后音频时钟 → **丢帧好过整体延迟**。实测（lip 服务未开、必然积压）13 片派发 / **丢 4 片**，逻辑生效 |
 
+### 3.16 配置中心纪律（2026-09-17 收口）
+
+`config.yaml` 的 `asr` 段曾 **6 个字段代码一个都不读**（`asr/streaming.py` 全硬编码），
+且 `chunk_size` 值与实现不符（config `[5,10,5]` vs 代码 `[0,10,5]`）——写配置的人以为改了，
+实际跑的永远是硬编码值。**这是最隐蔽的一类坑：改动看起来生效、验证时却"没变化"。**
+
+已收口：`model` / `chunk_size` 接回代码（实测：把 `chunk_size` 改成 `[0,20,5]`，
+`CHUNK_STRIDE` 立刻 9600 → 19200 样本、600 → 1200ms）；删除 `provider` / `vad_model` /
+`streaming` / `chunk_stride` 四个名义项。
+
+**三条纪律**：
+1. 改配置前先 `grep -rn "<字段名>" backend/src/`，**确认它真的被读**；
+2. 加配置项**同批改代码**，否则就是文档债务；
+3. `chunk_size` 改动会改分片粒度，而**前端 `useMicCapture` 按同一粒度（9600 样本）硬编码切片**——
+   两边必须一致（SPEC §5.4），改后需重跑 V-03 标定。
+
 ## 4. 模型与下载源
 
 - 模型权重国内优先 **ModelScope**（DESIGN §5.4 坑 2）：FunASR（paraformer-zh-streaming + fsmn-vad）、CosyVoice2、MuseTalk 权重
@@ -287,3 +303,5 @@ python backend/eval/verify_e2e_lip.py "运费怎么算"
 | 2026-09-14 | **流水线重叠 + WS 连接复用**：overlap 实测 83%，A/B 归因净收益 45.8ms；连接复用使 TTS 首包 418~513ms→343~402ms（踩坑见 §1） |
 | 2026-09-14 | **接入语音输入（ASR）**：`asr/streaming.py` + `POST /api/v1/asr/chunk` + 前端 AudioWorklet 采集与前端 VAD（ADR-004）；真实测试集 7 条识别全对；打断（FR-06）随之可用（踩坑 8~11） |
 | 2026-09-14 | **口型服务化落地（云 GPU）**：`deploy/lip_service.py`（常驻模型+avatar、去逐帧落盘、JPEG 直出）+ 本机 `lip/musetalk_engine.py` 客户端 + SSE `lip_frame` 事件流 + SSH 隧道；端到端 184 帧验证通过。**关键实测：GPU 生成 92fps（V-01 的 19.07 是 I/O 瓶颈）、隧道仅 0.96MB/s、H.264 比逐帧 JPEG 小 41×**（踩坑 14~19，报告 eval/reports/lip_service_check.md） |
+| 2026-09-17 | **会话持久化 + 契约/并发硬化**：新增 `GET /api/v1/session/{id}` 存活探测；前端 localStorage 恢复会话与历史（后端重启则保留历史并提示上下文已重置）；口型队列背压（`lip.queue_max`）+ `done.lip_dropped`（SPEC v1.8）；`POST /asr/chunk` 补 HTTP 契约 + `seq` 语义（SPEC v1.9） |
+| 2026-09-17 | **配置中心收口（§3.16）**：`asr` 段 6 字段代码从不读取且 `chunk_size` 值与实现不符 → `model`/`chunk_size` 接回代码、删除 4 个名义项；顺带修正 DESIGN 目录图（`vad/` 已删） |

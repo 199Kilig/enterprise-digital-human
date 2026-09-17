@@ -47,6 +47,51 @@ interface AudioSink {
   sources: AudioBufferSourceNode[] // 已排期的分片，打断时逐个 stop
 }
 
+/**
+ * 本地会话持久化（**轻档**：只存前端）。
+ *
+ * 解决的是"刷新就丢历史"。为什么不直接做服务端持久化：后端会话是进程内内存态
+ * （`routes.py` 的 `_sessions`，P1 范围），要做服务端持久化得建表 + 加端点（"重档"）。
+ * 这里用 localStorage + 一个存活探测端点，做到：
+ *   - 恢复会话命中 → 复用同一 session_id，**后端 ctx.history 还在，多轮上下文连续**
+ *   - 恢复失配（后端重启过）→ 新建会话，但**本地历史仍显示**（并明确提示上下文已重置）
+ * 只存 user/digital 两类气泡；system 是调试信息，不落盘。
+ */
+const STORAGE_KEY = 'dh.console.session.v1'
+const PERSIST_LIMIT = 50
+
+interface PersistedSession {
+  sessionId: string
+  messages: ChatMessage[]
+}
+
+function loadPersisted(): PersistedSession | null {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw) as PersistedSession
+    return p && typeof p.sessionId === 'string' && Array.isArray(p.messages) ? p : null
+  } catch {
+    return null
+  }
+}
+
+function savePersisted(p: PersistedSession): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(p))
+  } catch {
+    /* 隐私模式 / 配额满：持久化失败不影响正常使用 */
+  }
+}
+
+function clearPersisted(): void {
+  try {
+    window.localStorage.removeItem(STORAGE_KEY)
+  } catch {
+    /* 同上 */
+  }
+}
+
 export default function ConsolePage() {
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [state, setState] = useState<SessionState>('idle')
@@ -151,16 +196,45 @@ export default function ConsolePage() {
     api.metrics().then(setMetrics).catch((e: Error) => setError(e.message))
   }, [])
 
-  const resetSession = useCallback(async () => {
+  /** 建立会话。默认先尝试恢复 localStorage 里的会话；`fresh: true` 强制清空重开。 */
+  const resetSession = useCallback(async (opts?: { fresh?: boolean }) => {
     closeRef.current?.()
     setEvents([])
-    setMessages([])
     setStreamText(null)
     setLastTurn(null)
     setError(null)
     seqRef.current = {}
     bufRef.current = ''
+    mutedRef.current = false
     resetLip()
+
+    const saved = opts?.fresh ? null : loadPersisted()
+    if (opts?.fresh) {
+      setMessages([])
+      clearPersisted()
+    }
+
+    if (saved) {
+      setMessages(saved.messages) // 先恢复历史：用户立刻看到上一轮的对话
+      try {
+        const probe = await api.getSession(saved.sessionId)
+        setSession({ session_id: probe.session_id, created_at: probe.created_at })
+        t0Ref.current = Date.now()
+        setState('listening')
+        return // 复用成功：后端上下文（ctx.history）也在，多轮连续
+      } catch {
+        // 后端重启过 → 旧会话失效，但本地历史保留（下面新建会话）
+        setMessages((m) => [
+          ...m,
+          {
+            role: 'system',
+            at: Date.now(),
+            text: '服务端会话已重置（后端重启动过）：以上历史仅供查看，多轮上下文从本轮重新开始',
+          },
+        ])
+      }
+    }
+
     try {
       const s = await api.createSession()
       setSession(s)
@@ -176,6 +250,13 @@ export default function ConsolePage() {
     void resetSession()
     return () => closeRef.current?.()
   }, [resetSession])
+
+  // 会话 + 对话历史落 localStorage（轻档持久化）：刷新/重开页面后恢复显示
+  useEffect(() => {
+    if (!session) return
+    const keep = messages.filter((m) => m.role !== 'system').slice(-PERSIST_LIMIT)
+    savePersisted({ sessionId: session.session_id, messages: keep })
+  }, [session, messages])
 
   /** 一轮对话：文本 → SSE（真实 ASR端点 → DeepSeek 流式） */
   const sendTurn = useCallback(
@@ -433,7 +514,7 @@ export default function ConsolePage() {
                 meta={stageMeta}
                 canInterrupt={state === 'speaking'}
                 onInterrupt={handleInterrupt}
-                onReconnect={() => void resetSession()}
+                onReconnect={() => void resetSession({ fresh: true })}
               />
             </div>
           </div>

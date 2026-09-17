@@ -37,6 +37,12 @@ export const api = {
   createSession: () =>
     fetch(`${BASE}/session`, { method: 'POST' }).then((r) => json<SessionInfo>(r)),
 
+  /** 会话存活探测（刷新后恢复用）。会话失效会抛 404 错误 → 调用方新建会话。 */
+  getSession: (sessionId: string) =>
+    fetch(`${BASE}/session/${sessionId}`).then((r) =>
+      json<{ session_id: string; state: string; created_at: string; history_len: number }>(r),
+    ),
+
   closeSession: (sessionId: string) =>
     fetch(`${BASE}/session/${sessionId}`, { method: 'DELETE' }).then((r) => json<{ status: string }>(r)),
 

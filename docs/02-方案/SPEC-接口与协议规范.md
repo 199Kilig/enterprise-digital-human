@@ -108,6 +108,10 @@ class SessionContext:
     history: List[dict] = field(default_factory=list)  # 对话历史 [{role, content}]
     buffer_audio: List[TtsSegment] = field(default_factory=list)  # 待播放 TTS 队列
     buffer_lip: List[LipFrame] = field(default_factory=list)      # 待渲染口型帧队列
+    # ⚠️ P1 未落地（v1.8 标注）：实际队列是 chat_stream 内的局部变量
+    #    （token_q / sentence_q / audio_q / lip_in_q），这两个会话级缓冲字段目前无人使用。
+    #    保留原因：P2 若做「打断后继续播」或服务端侧缓冲会用；若确定不做，应从契约删除
+    #    （按 §8 变更规则，删除字段需提 ADR）。
 
 
 # ============ 错误响应 ============
@@ -203,7 +207,7 @@ data: {JSON}
 | `tts_audio`   | TTS 输出每个音频分片       | `{"seq": 0, "audio_b64": "...", "start_ms": 0, "end_ms": 320, "words": [["你好",0,300]]}` | audio_b64 为 PCM 数据的 base64 编码                 |
 | `lip_frame`   | 口型驱动输出视频帧（`transport=frames` 兼容路径） | `{"seq": 0, "frame_b64": "...", "pts_ms": 0, "frame_idx": 0}` | frame_b64 为 JPEG 的 base64；P1 原路径，仅 A/B 对照时启用 |
 | `lip_video`   | 口型驱动输出**整句 H.264 片段**（v1.2 默认，见 ADR-005） | `{"seq": 0, "video_b64": "...", "start_ms": 0, "duration_ms": 320, "n_frames": 8, "fps": 25, "sentence_offset_ms": 0}` | video_b64 为 MP4(H.264) 的 base64；一个片段对应一句回答音频 |
-| `done`        | 一次回答完整结束           | `{"total_seq_audio": 10, "total_seq_lip": 45, "duration_ms": 3200, "placeholder": false}` | 前端收到后关闭本次播放循环。**`placeholder: true` = 无 `text` 的空跑流**（如 SSE 断线重连），不是一轮真实回答 → 前端必须忽略（v1.7） |
+| `done`        | 一次回答完整结束           | `{"total_seq_audio": 10, "total_seq_lip": 45, "duration_ms": 3200, "placeholder": false, "lip_dropped": 0}` | 前端收到后关闭本次播放循环。**`placeholder: true` = 无 `text` 的空跑流**（如 SSE 断线重连），不是一轮真实回答 → 前端必须忽略（v1.7）。**`lip_dropped` = 口型队列背压丢掉的片段数，>0 说明口型跟不上（v1.8）** |
 | ⚠️ 被打断的一轮 | **不发 `done`** | — | `interrupt` 置位 `stop_requested` 后生成器立即停止产出并直接结束；`INTERRUPTED → LISTENING` 只由 `/interrupt_done` 驱动（v1.7） |
 | `error`       | 任何环节出错               | `{"code": "TTS_TIMEOUT", "message": "...", "retry_after": 3}` | 见 §6 错误码                                        |
 
@@ -306,6 +310,18 @@ POST /api/v1/session
 响应: { "session_id": "xxx", "created_at": "2026-09-01T..." }
 ```
 
+### 5.1.1 会话存活探测（v1.8）
+
+```
+GET /api/v1/session/{session_id}
+响应: { "session_id": "xxx", "state": "listening", "created_at": "...", "history_len": 0 }
+不存在 → 404 SESSION_NOT_FOUND
+```
+
+用途：前端从本地存储恢复会话前探测是否仍存活。会话是**进程内内存态**（P1），后端重启即全体失效——
+前端据此区分「复用同一会话（后端 `ctx.history` 还在，**多轮上下文连续**）」与「新建会话但保留本地历史」。
+只读端点，不改状态、不刷新 `last_active`。
+
 ### 5.2 主动打断
 
 ```
@@ -382,6 +398,7 @@ DELETE /api/v1/session/{session_id}
 | **v1.1** | **2026-09-01** | **勘误：TtsSegment 增 sample_rate 字段、新增 §2.1 lip 推理服务接口、§4.3 分辨率表述修正、§7 端到端口径统一为"首包"** | -    |
 | **v1.2** | **2026-09-14** | **口型传输载体改为 H.264 整句片段：§2.1 响应增 `video_b64`/`duration_ms`/`n_frames`（`frames` 保留为兼容路径）、§3.3 新增 `lip_video` 事件、§3.5 增片段排队播放约定。**依据 ADR-005**（实测跨机链路 0.96MB/s，逐帧 JPEG 16.2s/句 vs H.264 0.39s，41×）** | -    |
 | **v1.3** | **2026-09-14** | **口型改为按音频分片请求：§2.1 语义由"一句一次请求"修订为"每 ~1s 音频分片一次请求"。**依据 ADR-006**（整句送检导致首片段迟到 +5274ms；分片后 +205ms，后续片段全部提前到达）** | - |
+| **v1.8** | **2026-09-17** | **① §5.1.1 新增会话存活探测端点**（前端刷新恢复会话用）；**② `done` 增 `lip_dropped`**：口型输入队列改限长 + **满则丢最旧**（TTS 合成快于单 GPU 串行口型推理，无界队列会让片段滞后于音频时钟 → 音画同步崩）；**③ §2 标注 `buffer_audio/buffer_lip` P1 未落地**；**④ TTS 连接独占**——DashScope 音频帧是裸二进制、不带 `task_id`，并发使用同一连接会把 A 句音频当成 B 句的，`CosyVoiceTts.stream` 加独占锁（当前串行消费下为防御性） | - |
 | **v1.7** | **2026-09-15** | **打断真正生效（FR-06）**：`/interrupt` 置位会话级 `stop_requested`，`/chat/stream` 生成器轮询到即停止产出（不再发 token/TTS/口型）且**不发 `done`**；`done` 新增 `placeholder` 字段标识空跑流。依据：此前打断只改状态机状态，生成器照旧把整轮发完 → 用户感受"无法打断"（实测证据 `verify_interrupt_e2e.py`：修复后 interrupt → 流结束 5ms、后续 tts_audio 0 条） | - |
 | **v1.6** | **2026-09-15** | **前端 VAD 三项修复（依据离线标定，证据 `backend/eval/reports/asr_mic_check.md`）**：① §7 静音阈值改为自适应 `max(底噪估计×3, 0.004)`（底噪用只降不升的 min 跟踪器）——固定 0.012 在底噪 ≥0.012 的环境下端点永不触发；② `mic-processor.js` 的帧 RMS 改为**整帧口径**（原实现等价于 ~4ms 窗口，低估 19%、漏检 50ms 瞬态；修正后 worklet/理论一致性 0.993~1.000）；③ 打断判据改为 `max(底噪×8, 0.03)` + **连续 2 帧（200ms）去抖**（RMS 修正后瞬态会命中瞬时判据） | - |
 | **v1.5** | **2026-09-15** | **ASR 实现收口：`ASR_TIMEOUT` 落地（单块 >3s；事后判定而非中断推理——FunASR 同步阻塞，强杀线程会破坏模型状态）；`AsrChunk.start_ms/end_ms` 修正为覆盖本次增量全部分块；§6 去掉 ASR_TIMEOUT「未实现」标注** | - |

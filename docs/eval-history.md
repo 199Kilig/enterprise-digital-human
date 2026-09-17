@@ -14,6 +14,8 @@
 |---|---|---|---|---|---|
 | 延迟 | ASR 单块处理 | **166ms**（RTF 0.27） | 600ms/块流式，CPU；首字端到端≈766ms（V-03，2026-09-02） | 本机 | eval/reports/funasr_streaming.json |
 | 延迟 | ASR 上行往返 | **~250ms/片**（含 HTTP；模型加载首片 22s 除外） | 600ms PCM 分片经 `POST /api/v1/asr/chunk`，真实测试集 7 条全对（2026-09-14） | 本机 CPU | eval/reports/asr_endpoint_check.md |
+| 准确率 | ASR 流式模型字准率（干净音频） | **100%**（7/7 全对，CER 0.000） | 固定测试集 `data/testset/audio` 7 条，按 600ms 分片喂流式模型（2026-09-17） | 本机 CPU | eval/reports/asr_model_compare.json |
+| 准确率 | 流式 vs 离线模型（two-pass 判据） | 精度**打平**（均 100%）；耗时 **流式 1249ms / 离线 557ms** 每条 | 同一 7 条各跑两遍（均排除首次模型加载）。**结论：干净音频上 two-pass 无精度收益**（+0pt / 代价 +557ms）；是否在真实麦克风场景有收益待真人样本判定（2026-09-17） | 本机 CPU | eval/reports/asr_model_compare.json |
 | 延迟 | LLM 首 token | **~740ms**（503~1108ms 波动） | deepseek-chat 流式首 token，3 次实测（V-04，2026-09-02） | 本机 | eval/reports/llm_streaming.json |
 | 延迟 | TTS 首包 | **618ms**（探针实测；目标 300ms → 未达标） | CosyVoice v2 WebSocket，16k PCM 首片到达（V-02 探针，2026-09-14） | 本机 | eval/reports/e2e_latency.json |
 | 延迟 | 口型首帧 | 待测 | MuseTalk 首帧（V-01）。realtime 吞吐已测（19.07fps/52.4ms 每帧，见资源行），但首帧延迟本脚本无独立时间戳，待插桩测量 | 云 GPU | eval/reports/musetalk_validation.json |

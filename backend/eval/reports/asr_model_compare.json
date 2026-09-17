@@ -1,0 +1,77 @@
+{
+  "date": "2026-09-17",
+  "rows": [
+    {
+      "id": "t1-01",
+      "expect": "你们家运费怎么算",
+      "streaming": "你们家运费怎么算",
+      "offline": "你 们 家 运 费 怎 么 算",
+      "cer_streaming": 0.0,
+      "cer_offline": 0.0,
+      "streaming_ms": 1056.8,
+      "offline_ms": 931.2
+    },
+    {
+      "id": "t1-02",
+      "expect": "下单后多久能发货",
+      "streaming": "下单后多久能发货",
+      "offline": "下 单 后 多 久 能 发 货",
+      "cer_streaming": 0.0,
+      "cer_offline": 0.0,
+      "streaming_ms": 1318.8,
+      "offline_ms": 475.1
+    },
+    {
+      "id": "t2-01",
+      "expect": "我想退货流程怎么走",
+      "streaming": "我想退货流程怎么走",
+      "offline": "我 想 退 货 流 程 怎 么 走",
+      "cer_streaming": 0.0,
+      "cer_offline": 0.0,
+      "streaming_ms": 1431.8,
+      "offline_ms": 530.0
+    },
+    {
+      "id": "t2-02",
+      "expect": "退款一般多久到账",
+      "streaming": "退款一般多久到账",
+      "offline": "退 款 一 般 多 久 到 账",
+      "cer_streaming": 0.0,
+      "cer_offline": 0.0,
+      "streaming_ms": 1097.3,
+      "offline_ms": 459.5
+    },
+    {
+      "id": "t3-01",
+      "expect": "你们发货要多久那运费呢包邮的话几天能到",
+      "streaming": "你们发货要多久那运费呢包邮的话几天能到",
+      "offline": "你 们 发 货 要 多 久 那 运 费 呢 包 邮 的 话 几 天 能 到",
+      "cer_streaming": 0.0,
+      "cer_offline": 0.0,
+      "streaming_ms": 2569.3,
+      "offline_ms": 848.9
+    },
+    {
+      "id": "t6-01",
+      "expect": "在吗",
+      "streaming": "在吗",
+      "offline": "在 吗",
+      "cer_streaming": 0.0,
+      "cer_offline": 0.0,
+      "streaming_ms": 625.8,
+      "offline_ms": 332.5
+    },
+    {
+      "id": "t6-02",
+      "expect": "谢谢",
+      "streaming": "谢谢",
+      "offline": "谢 谢",
+      "cer_streaming": 0.0,
+      "cer_offline": 0.0,
+      "streaming_ms": 642.4,
+      "offline_ms": 319.1
+    }
+  ],
+  "mean_cer_streaming": 0.0,
+  "mean_cer_offline": 0.0
+}

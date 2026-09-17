@@ -88,9 +88,21 @@ def read_wav(path: Path) -> np.ndarray:
     return data
 
 
+_warmed = False
+
+
 def run_streaming(audio: np.ndarray) -> tuple[str, float]:
-    """复现前端：600ms 分片逐片 push，最后一片 end=True。"""
+    """复现前端：600ms 分片逐片 push，最后一片 end=True。
+
+    ⚠️ 必须先预热 `get_model()`：模型冷启动约 22s，若算进第一条的计时，会把
+    7 条的平均耗时虚高到秒级，与 offline（其加载时间被单独排除）不可比。
+    """
+    global _warmed
     import asr.streaming as streaming
+
+    if not _warmed:
+        streaming.get_model()  # 预热，与 offline 的计时口径对齐
+        _warmed = True
 
     asr = streaming.StreamingAsr()
     t0 = time.perf_counter()

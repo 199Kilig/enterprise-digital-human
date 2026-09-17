@@ -239,5 +239,8 @@ export function useMicCapture(sessionId: string | null, cbRef: React.MutableRefO
     [sessionId, postChunk, cbRef, release, stop],
   )
 
-  return { recording, monitoring, start, stop: () => void stop(false), stopMonitor }
+  // ⚠️ 手动"结束"必须当作端点（sendEndpoint=true）：按钮文案承诺的是"点击结束**并发送**"
+  //   （ConversationPanel 的 title），而旧实现传 false → onEndpoint 永不触发 → 文字发不出去，
+  //   只留在 liveText 里，表现为"点了结束没反应，再点说话又看到上次的字"。
+  return { recording, monitoring, start, stop: () => void stop(true), stopMonitor }
 }

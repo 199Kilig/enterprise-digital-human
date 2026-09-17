@@ -556,7 +556,13 @@ export default function ConsolePage() {
               liveText={liveText}
               micLevel={micLevel}
               onSend={sendTurn}
-              onMicToggle={() => (recording ? stopMic() : void startMic())}
+              onMicToggle={() => {
+                // 两侧都清 liveText：结束侧清掉"没说话就点结束"时的残留（那种情况下
+                // onEndpoint 不会被调用，不会清）；开始侧清掉上一轮的残影。
+                setLiveText('')
+                if (recording) stopMic()
+                else void startMic()
+              }}
             />
           </div>
 

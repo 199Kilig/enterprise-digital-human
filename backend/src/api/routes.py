@@ -24,6 +24,7 @@ from asr.streaming import AsrError, StreamingAsr
 from brain.llm import BrainError, DeepSeekBrain
 from brain.segmenter import SentenceSplitter
 from config import load_config
+from constants import BYTES_PER_MS, bytes_to_ms
 from lip import LipServiceError, build_lip_engine
 from schemas import SessionContext, SessionState
 from tts.cosyvoice import CosyVoiceTts, TtsError
@@ -50,9 +51,11 @@ _LIP_FPS = int(_LIP_CFG.get("fps", 25))
 # ADR-006：口型按音频**分片**送推理（不是整句一次），以缩小音画偏差。
 # 16kHz 单声道 PCM16 = 32 字节/毫秒
 _LIP_CHUNK_MS = int(_LIP_CFG.get("chunk_ms", 1000))
-_LIP_CHUNK_BYTES = max(1, _LIP_CHUNK_MS) * 32
+_LIP_CHUNK_BYTES = max(1, _LIP_CHUNK_MS) * BYTES_PER_MS  # 16k PCM16 = 32 B/ms（constants）
 _LIP_MIN_TAIL_MS = int(_LIP_CFG.get("min_tail_ms", 200))
-_LIP_MIN_TAIL_BYTES = max(1, _LIP_MIN_TAIL_MS) * 32
+_LIP_MIN_TAIL_BYTES = max(1, _LIP_MIN_TAIL_MS) * BYTES_PER_MS
+# 口型输入队列限长（config.yaml lip.queue_max）。满则丢最旧，见 gen() 里的 lip_put
+_LIP_QUEUE_MAX = int(_LIP_CFG.get("queue_max", 8))
 # 逐片诊断日志（默认关）：排查音画偏差时设 LIP_DEBUG=1，会打印每片的派发/返回时刻
 _LIP_DEBUG = os.environ.get("LIP_DEBUG", "") == "1"
 
@@ -103,6 +106,25 @@ def create_session(user_id: Optional[str] = None) -> dict:
     )
     _machines[session_id] = SessionStateMachine(session_id=session_id)
     return {"session_id": session_id, "created_at": now.isoformat()}
+
+
+@router.get("/session/{session_id}")
+def get_session(session_id: str) -> dict:
+    """只读探测会话是否存活（前端刷新后恢复会话用）。
+
+    为什么需要：会话是**进程内内存态**（P1），后端一重启旧 session_id 全部失效。
+    前端从 localStorage 恢复前先探一次：
+      - 命中 → 直接复用该 session → **后端 ctx.history 还在，多轮上下文不断**
+      - 404 → 前端新建会话，但保留本地历史（仅可查看，LLM 上下文从零开始）
+    """
+    ctx = _get_session(session_id)
+    machine = _get_machine(session_id)
+    return {
+        "session_id": session_id,
+        "state": machine.state.value,
+        "created_at": ctx.created_at.isoformat(),
+        "history_len": len(ctx.history),
+    }
 
 
 @router.delete("/session/{session_id}")
@@ -217,6 +239,7 @@ _BRAIN_SYSTEM_PROMPT = (
 )
 
 
+
 def _sse(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
@@ -269,7 +292,22 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
         sentence_q: asyncio.Queue = asyncio.Queue()
         audio_q: asyncio.Queue = asyncio.Queue()
         # 口型：整句 PCM → 云 GPU 推理 → 帧（ADR-001；SPEC §3.2 lip_frame 事件）
-        lip_in_q: asyncio.Queue = asyncio.Queue()
+        # ⚠️ 限长 + 满则丢最旧（#6）：TTS 合成快于实时，而口型是单 GPU 串行推理，
+        # 无界队列会让片段越积越多、严重滞后于音频时钟 → 音画同步直接崩
+        # （RUNBOOK §3.14 的待验项：单片生成 >1000ms 就会出现积压）。
+        # 丢旧留新：迟到的片段按音频时钟已播不出去（SPEC §3.5）——**丢帧好过整体延迟**。
+        lip_in_q: asyncio.Queue = asyncio.Queue(maxsize=_LIP_QUEUE_MAX)
+
+        async def lip_put(item: object) -> None:
+            while lip_in_q.full():
+                try:
+                    dropped = lip_in_q.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                lip_info["dropped"] = int(lip_info.get("dropped", 0)) + 1
+                if _LIP_DEBUG:
+                    print(f"[lip] queue full -> drop {dropped[1] if dropped else None}ms", flush=True)
+            await lip_in_q.put(item)
         lip_out_q: asyncio.Queue = asyncio.Queue()
 
         llm_info: Dict[str, object] = {"parts": [], "ttft_ms": None, "done_ms": None, "error": None}
@@ -328,13 +366,13 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
                         if chunk.audio:
                             if tts_info["first_ms"] is None:
                                 tts_info["first_ms"] = int((time.perf_counter() - t0) * 1000)
-                            offset_ms = chunk.offset_ms + int(len(chunk.audio) / 32)  # 32 B/ms
+                            offset_ms = chunk.offset_ms + bytes_to_ms(len(chunk.audio))
                             pcm_buf.extend(chunk.audio)
                             # ADR-006：音频一到就按 ~chunk_ms 切片送口型，**不等整句合成完**。
                             # 依据：TTS 合成快于实时（实测 5.27s 出 7.28s 音频），分片送检才能让
                             # 口型片段在该播之前就绪；整句送检时首片段迟到 5.3s（见 ADR-006 实测表）。
                             while _LIP_ON and len(pcm_buf) >= _LIP_CHUNK_BYTES:
-                                await lip_in_q.put((bytes(pcm_buf[:_LIP_CHUNK_BYTES]), buf_start_ms))
+                                await lip_put((bytes(pcm_buf[:_LIP_CHUNK_BYTES]), buf_start_ms))
                                 del pcm_buf[:_LIP_CHUNK_BYTES]
                                 # 诊断日志（LIP_DEBUG=1 时开）：派发时刻 vs 音频时钟
                                 if _LIP_DEBUG:
@@ -349,14 +387,14 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
                         await audio_q.put(chunk)
                     # 句尾残片：太短就不单独跑一次推理（不值得为几十毫秒占一次 GPU）
                     if _LIP_ON and len(pcm_buf) >= _LIP_MIN_TAIL_BYTES:
-                        await lip_in_q.put((bytes(pcm_buf), buf_start_ms))
+                        await lip_put((bytes(pcm_buf), buf_start_ms))
                         lip_info["dispatched"] = int(lip_info["dispatched"]) + 1
             except TtsError as exc:
                 tts_info["error"] = exc
             finally:
                 tts_info["total_ms"] = int((time.perf_counter() - t_start) * 1000)
                 await audio_q.put(None)
-                await lip_in_q.put(None)
+                await lip_put(None)  # 哨兵也走同一 helper：满则先丢最旧腾位置
 
         async def lip_worker() -> None:
             """整句 PCM → 云 GPU 口型服务 → 帧序列（ADR-001：推理在云，编排在本机）。
@@ -451,7 +489,7 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
                                 "seq": audio_seq,
                                 "audio_b64": base64.b64encode(chunk.audio).decode("ascii"),
                                 "start_ms": chunk.offset_ms,
-                                "end_ms": chunk.offset_ms + int(len(chunk.audio) / 32),
+                                "end_ms": chunk.offset_ms + bytes_to_ms(len(chunk.audio)),
                                 "words": [[w[0], w[1], w[2]] for w in chunk.words],
                                 "sample_rate": 16000,
                             },
@@ -517,9 +555,16 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
                 # 让出事件循环给生产者任务（两个队列都空时的唯一等待点）
                 await asyncio.sleep(0.005)
         finally:
-            for task in (llm_task, tts_task, lip_task):
-                if task is not None and not task.done():
-                    task.cancel()
+            pending = [t for t in (llm_task, tts_task, lip_task) if t is not None and not t.done()]
+            for t in pending:
+                t.cancel()
+            if pending:
+                # 只 cancel 不 await → CancelledError 无人接管（"Task was destroyed but it is
+                # pending" 警告），且子任务 finally 里的队列收尾可能被跳过。
+                try:
+                    await asyncio.gather(*pending, return_exceptions=True)
+                except Exception:  # noqa: BLE001
+                    pass
 
         if ctx.stop_requested:
             # 被打断：**不发 done**。状态机此刻是 INTERRUPTED，若继续往下走
@@ -570,6 +615,7 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
                 "lip_transport": lip_info["transport"],
                 "lip_bytes": lip_info["bytes"],
                 "lip_chunks": lip_info["dispatched"],
+                "lip_dropped": lip_info.get("dropped", 0),  # 队列背压丢掉的片段数（>0 说明口型跟不上）
                 "lip_chunk_ms": lip_info["chunk_ms"],
                 "lip_error": lip_info["error"],
                 "ttft_ms": ttft_ms,

@@ -36,6 +36,30 @@ def test_lip_pipeline_config_resolved() -> None:
     assert 0 <= mod._LIP_MIN_TAIL_MS < mod._LIP_CHUNK_MS, "尾片阈值应小于分片粒度"
 
 
+def test_session_probe_endpoint() -> None:
+    """会话存活探测端点（前端刷新后恢复会话用，v1.8 新增）。
+
+    为什么需要测试：前端恢复会话全靠它区分"后端还活着"与"后端重启过"——
+    前者复用同一 session_id（多轮上下文连续），后者新建会话但保留本地历史。
+    它一旦坏掉，症状是"刷新后历史看得到、但数字人完全不记得之前聊过"。
+    """
+    from fastapi.testclient import TestClient
+
+    mod = importlib.import_module("api.routes")
+    client = TestClient(mod.app)
+    sid = client.post("/api/v1/session").json()["session_id"]
+
+    r = client.get(f"/api/v1/session/{sid}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["session_id"] == sid
+    assert body["state"] == "listening"
+    assert body["history_len"] == 0
+    assert body["created_at"]
+
+    assert client.get("/api/v1/session/deadbeef").status_code == 404
+
+
 def test_lip_service_url_must_not_use_localhost() -> None:
     """服务 URL 禁用 localhost：本机 localhost 解析 ~2s/次（RUNBOOK 坑 20，实测）。"""
     mod = importlib.import_module("api.routes")

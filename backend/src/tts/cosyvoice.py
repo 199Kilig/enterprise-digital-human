@@ -30,10 +30,9 @@ from typing import AsyncIterator, Optional
 import websockets
 
 from config import get_secret, load_config
+from constants import BYTES_PER_MS, SAMPLE_RATE  # 单一定义，勿在本模块重定义（见 constants.py）
 
 WS_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
-SAMPLE_RATE = 16000
-BYTES_PER_MS = SAMPLE_RATE * 2 / 1000  # PCM 16bit 单声道：32 B/ms
 
 
 class TtsError(Exception):
@@ -114,6 +113,15 @@ class _Session:
         self._ws: object | None = None
         self._lock = asyncio.Lock()
         self.connect_ms: Optional[int] = None
+        # 同一连接**同时只允许一个 tts task**（#10）：DashScope duplex 的事件按 task_id 隔离，
+        # 但**音频是裸二进制帧、不带 task_id**，接收侧无法区分属于哪个 task
+        # → 并发使用同一连接必然把 A 句的音频当成 B 句的。
+        # 这里用锁把"并发"变成"排队"；当前 tts_consumer 本就串行消费，属防御性加锁、不改变现状。
+        self._task_lock = asyncio.Lock()
+
+    def use(self) -> asyncio.Lock:
+        """独占使用本条连接的锁（见上方说明）。"""
+        return self._task_lock
 
     async def get(self) -> tuple[object, bool]:
         """返回 (连接, 是否复用)。"""
@@ -157,17 +165,21 @@ class CosyVoiceTts:
 
         start_offset_ms：该句在整轮回答音频中的起点（上一句累计时长），
         由调用方维护以保证多句拼起来的音画时间轴连续。
+
+        ⚠️ **同一实例同时只允许一个 task**（`_Session.use`）：DashScope 的音频帧不带
+        task_id，无法按 task 区分，并发使用同一连接会串音频。
         """
-        try:
-            async for chunk in self._stream_once(text, start_offset_ms, timeout_s):
-                yield chunk
-        except TtsError as exc:
-            if not exc.retryable:
-                raise
-            # 连接失效（Idle 断链等）→ 重建后重试一次
-            self._session.invalidate()
-            async for chunk in self._stream_once(text, start_offset_ms, timeout_s):
-                yield chunk
+        async with self._session.use():
+            try:
+                async for chunk in self._stream_once(text, start_offset_ms, timeout_s):
+                    yield chunk
+            except TtsError as exc:
+                if not exc.retryable:
+                    raise
+                # 连接失效（Idle 断链等）→ 重建后重试一次
+                self._session.invalidate()
+                async for chunk in self._stream_once(text, start_offset_ms, timeout_s):
+                    yield chunk
 
     async def _stream_once(
         self, text: str, start_offset_ms: int, timeout_s: float
@@ -240,7 +252,11 @@ class CosyVoiceTts:
                     evt = json.loads(msg)
                 except json.JSONDecodeError:
                     continue
-                name = evt.get("header", {}).get("event")
+                header = evt.get("header") or {}
+                evt_task = header.get("task_id")
+                if evt_task is not None and evt_task != task_id:
+                    continue  # 其他 task 的事件（串行使用下不会出现；见 _Session.use）
+                name = header.get("event")
 
                 if name == "result-generated":
                     sentence = (evt.get("payload", {}).get("output", {}) or {}).get("sentence") or {}

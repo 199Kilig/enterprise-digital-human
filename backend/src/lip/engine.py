@@ -12,6 +12,7 @@ from typing import List, Optional, Tuple
 
 from PIL import Image
 
+from constants import BYTES_PER_MS
 from schemas import LipFrame
 
 
@@ -48,7 +49,7 @@ class MockLipEngine(LipEngine):
         fps: int,
         session_id: Optional[str] = None,
     ) -> dict:
-        duration_s = len(audio_pcm_16k) / 32000.0  # 16kHz * 2B/sample
+        duration_s = len(audio_pcm_16k) / (BYTES_PER_MS * 1000)  # 16k 单声道 PCM16
         n_frames = max(1, int(duration_s * fps))
         frame = _placeholder_jpeg()
         t0 = time.time()

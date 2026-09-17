@@ -67,6 +67,10 @@ export default function ConsolePage() {
   const [micLevel, setMicLevel] = useState(0)
   const micCbRef = useRef<MicCallbacks | null>(null)
   const bargeAtRef = useRef(0)
+  // 打断静默期：/interrupt 发出后到新一轮开始前，丢弃**在途到达**的音频/口型分片。
+  // 为什么需要：关流是异步的，打断瞬间可能已有 1~2 个 tts_audio 事件在队列里，
+  // 不丢弃会在 stopPlayback() 之后重建 AudioSink 继续出声（症状："停完又蹦半句"）。
+  const mutedRef = useRef(false)
   const {
     recording,
     monitoring,
@@ -186,6 +190,7 @@ export default function ConsolePage() {
       seqRef.current = {}
       t0Ref.current = Date.now()
       setAudioStats(null)
+      mutedRef.current = false // 新一轮：解除打断静默期
       stopPlayback() // 上一轮若还在播（含打断后残留），先干净停掉
 
       closeRef.current = openStream(
@@ -213,11 +218,13 @@ export default function ConsolePage() {
               setStreamText(bufRef.current)
             } else if (type === 'interrupted') {
               // 后端已确认打断：本地立刻停播 + 停口型（不等 /interrupt 往返）
+              mutedRef.current = true // 静默期：丢弃在途分片
               stopPlayback()
               resetLip()
               setState('interrupted')
             }
             else if (type === 'tts_audio') {
+              if (mutedRef.current) return // 打断静默期：丢弃在途音频
               setState('speaking')
               const b64 = String(payload.audio_b64 ?? '')
               const startMs = Number(payload.start_ms ?? 0)
@@ -235,9 +242,12 @@ export default function ConsolePage() {
                 const w = (payload.words as unknown[] | undefined)?.length ?? 0
                 setAudioStats((s) => ({ chunks: s?.chunks ?? 0, ms: s?.ms ?? 0, words: (s?.words ?? 0) + w }))
               }
-            } else if (type === 'lip_frame') setState('speaking')
-            else if (type === 'lip_video') {
+            } else if (type === 'lip_frame') {
+              if (mutedRef.current) return // 打断静默期：丢弃在途口型帧
+              setState('speaking')
+            } else if (type === 'lip_video') {
               // ADR-005 默认路径：整句 H.264 片段，按音频时钟排队播放
+              if (mutedRef.current) return // 打断静默期：丢弃在途口型片段
               setState('speaking')
               const b64 = String(payload.video_b64 ?? '')
               if (b64) {
@@ -312,7 +322,8 @@ export default function ConsolePage() {
   /** 打断：本地立刻停播/停口型/关流，再通知后端（DESIGN-打断 §3.3 规则3）。 */
   const handleInterrupt = async () => {
     if (!session) return
-    stopPlayback() // ① 数字人立刻闭嘴，不等后端往返
+    mutedRef.current = true // ① 静默期：丢弃在途分片（防止停播后又重建播放器出声）
+    stopPlayback() // ② 数字人立刻闭嘴，不等后端往返
     resetLip() // ② 口型片段也停
     closeRef.current?.() // ③ 关流：不再接收新分片（后端也会因 stop_requested 停止产出）
     closeRef.current = null

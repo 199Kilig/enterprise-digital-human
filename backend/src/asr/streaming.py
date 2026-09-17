@@ -19,15 +19,21 @@ from typing import Optional
 
 import numpy as np
 
+from config import load_config
 from schemas import AsrChunk
 
+# 配置中心（DESIGN §4.4）唯一入口。此前本模块把 model / chunk_size 硬编码，导致
+# config.yaml 的 asr 段与实现脱节（config 写 chunk_size=[5,10,5]，代码实际用 [0,10,5]）
+# → v1.9 收口：这两项改由 config 提供；另外 4 个从未被读取的字段已从 config 删除。
+_ASR_CFG = load_config().get("asr") or {}
+
 SAMPLE_RATE = 16000
-CHUNK_SIZE = [0, 10, 5]
-CHUNK_STRIDE = CHUNK_SIZE[1] * 960  # 9600 样本 = 600ms
-CHUNK_MS = CHUNK_STRIDE * 1000 // SAMPLE_RATE  # 600ms：时间戳换算基准（SPEC §2 start_ms/end_ms）
+MODEL_NAME = str(_ASR_CFG.get("model", "paraformer-zh-streaming"))
+CHUNK_SIZE = list(_ASR_CFG.get("chunk_size") or [0, 10, 5])
+CHUNK_STRIDE = CHUNK_SIZE[1] * SAMPLE_RATE * 60 // 1000  # 9600 样本 = 600ms
+CHUNK_MS = CHUNK_STRIDE * 1000 // SAMPLE_RATE            # 600ms：时间戳换算基准（SPEC §2 start_ms/end_ms）
 ENC_LOOK_BACK = 4
 DEC_LOOK_BACK = 1
-MODEL_NAME = "paraformer-zh-streaming"
 # SPEC §6：ASR_TIMEOUT = 单块识别 >3s。实测单块 166ms（CPU RTF 0.27），余量充足；
 # 冷启动后首个请求可能触发（RUNBOOK 坑 8：演示前先预热一次 /api/v1/asr/chunk）。
 ASR_TIMEOUT_S = 3.0

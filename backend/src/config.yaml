@@ -2,12 +2,16 @@
 # api_key 一律从环境变量读取（api_key_env 字段指定），不落盘
 
 asr:
-  provider: modelscope            # 模型下载源（国内优先，DESIGN §5.4 坑 2）
-  model: paraformer-zh-streaming  # 流式模型（离线版为 paraformer-zh）
-  vad_model: fsmn-vad
-  streaming: true
-  chunk_size: [5, 10, 5]
-  chunk_stride: 600
+  # ⚠️ 只有下面两项**代码真实读取**（`asr/streaming.py` 经 load_config）；
+  #    v1.9 已删除 4 个从未被读取、且会误导的字段：
+  #      provider（FunASR 自行从 ModelScope 下载，无 provider 开关）
+  #      vad_model（ADR-004 起 VAD/端点归前端，后端不持有 VAD 模型）
+  #      streaming（P1 只有流式这一条实现，开关无分支可走）
+  #      chunk_stride（派生值 = chunk_size[1]×960，写出来只会与代码不同步）
+  model: paraformer-zh-streaming  # 流式模型（离线版为 paraformer-zh，two-pass 备用）
+  chunk_size: [0, 10, 5]          # FunASR 流式参数 [左看, 分片粒度, 右看]，粒度单位 60ms → 600ms/片
+                                  # ⚠️ 改它会改分片粒度，而前端 useMicCapture 按同一粒度（9600 样本）切片，
+                                  #    两边必须一致（SPEC §5.4）；改后需重跑 V-03 标定
 
 llm:
   provider: deepseek
@@ -36,6 +40,7 @@ lip:
   crf: 26                         # H.264 质量（越大越小越糊）；实测 8s 音频 CRF26≈387KB、CRF23≈663KB
   chunk_ms: 1000                  # ADR-006：口型按音频分片送推理的片长（毫秒）；1000=每秒一片
   min_tail_ms: 200                # 句尾残片短于此值不单独推理（省一次 GPU 占用）
+  queue_max: 8                    # v1.8 背压：口型输入队列上限，满则丢最旧（丢帧好过整体延迟）
 
 cache:
   enabled: false                  # 高频回复缓存（P3 优化）

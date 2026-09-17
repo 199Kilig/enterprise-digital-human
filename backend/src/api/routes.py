@@ -187,6 +187,36 @@ class AsrChunkRequest(BaseModel):
 # 每会话一个流式识别器（P1 单机内存态；多实例需外部存储，非本项目范围）
 _asr_sessions: Dict[str, StreamingAsr] = {}
 
+# ASR 真人采集（`ASR_DEBUG=1` 启动时开）：把每次语音会话的**完整音频 + 识别文本**落盘，
+# 供 `eval/verify_asr_mic_accuracy.py` 做真人麦克风准确率复盘。
+# 为什么需要：固定测试集音频是 TTS 合成的（干净），识别全对；真实麦克风有噪声/口音/距离，
+# "感受不好"必须用真实样本才能定位是模型精度还是参数问题。默认关闭，不落盘。
+_ASR_DEBUG = os.environ.get("ASR_DEBUG", "") == "1"
+_ASR_CAPTURE_DIR = Path(__file__).resolve().parents[2] / "eval" / "reports" / "asr_capture"
+_asr_capture: Dict[str, bytearray] = {}
+
+
+def _dump_asr_capture(session_id: str, pcm: bytes, text: str) -> None:
+    """写 16k 单声道 wav + 同名 json。文件名前缀是时间戳，用于与念读顺序对齐。"""
+    import wave as _wave
+
+    try:
+        _ASR_CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
+        base = _ASR_CAPTURE_DIR / f"{time.strftime('%H%M%S')}_{session_id[:8]}"
+        with _wave.open(str(base.with_suffix(".wav")), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(16000)
+            w.writeframes(pcm)
+        base.with_suffix(".json").write_text(
+            json.dumps({"session_id": session_id, "text": text, "bytes": len(pcm),
+                        "duration_s": round(len(pcm) / (BYTES_PER_MS * 1000), 2)},
+                       ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:  # noqa: BLE001
+        pass  # 采集失败绝不影响识别主流程
+
 
 @router.post("/asr/chunk")
 def asr_chunk(req: AsrChunkRequest) -> dict:
@@ -208,6 +238,9 @@ def asr_chunk(req: AsrChunkRequest) -> dict:
             status_code=400, detail={"code": "ASR_ERROR", "message": f"audio_pcm_16k_b64 解码失败: {exc}"}
         ) from exc
 
+    if _ASR_DEBUG and audio:
+        _asr_capture.setdefault(req.session_id, bytearray()).extend(audio)
+
     try:
         chunk = asr.push(audio, is_last=req.end)
     except AsrError as exc:
@@ -223,6 +256,8 @@ def asr_chunk(req: AsrChunkRequest) -> dict:
         "end_ms": chunk.end_ms,
     }
     if req.end:
+        if _ASR_DEBUG:
+            _dump_asr_capture(req.session_id, bytes(_asr_capture.pop(req.session_id, b"")), asr.full_text)
         _asr_sessions.pop(req.session_id, None)  # 语句结束即释放流式状态
     return payload
 

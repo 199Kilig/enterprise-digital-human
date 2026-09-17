@@ -30,3 +30,6 @@ Thumbs.db
 
 # Python 构建产物
 *.egg-info/
+
+# 真人麦克风采集样本（ASR_DEBUG=1 落盘，仅供本机准确率复盘；真人语音不入库）
+backend/eval/reports/asr_capture/

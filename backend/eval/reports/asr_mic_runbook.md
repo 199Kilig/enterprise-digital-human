@@ -37,6 +37,45 @@ python backend/eval/prewarm_asr.py
 | **判据** | 识别文本与测试集一致（「你们家运费怎么算」）；数字人正常回答 |
 | **记录** | 识别文本：`______`；是否有回答：`是/否`；首响读数：`___ms` |
 
+## 1b. 准确率采集与复盘（真人样本 → 字准率报告）
+
+> **为什么必须单独做**：固定测试集音频是 **TTS 合成的**（干净、无噪声），流式模型在它上面近乎全对
+> （7/7）——所以"真机感受不好"用那批音频**根本定位不了**。必须留下真实麦克风的样本。
+
+**① 采集（后端要带开关，`start.bat` 不带）**
+
+```bash
+cd backend
+ASR_DEBUG=1 PYTHONPATH=src .venv/Scripts/python.exe -m uvicorn api.routes:app --host 127.0.0.1 --port 8010
+# 前端照常：cd frontend && npm run dev
+```
+
+**② 照 `docs/eval/EVAL-测试集定义.md` 的顺序逐条念**（从 T1-01 开始；一条一次语音会话：
+点"说话"→ 念 → 停顿等自动结束）。每轮结束自动落盘：
+
+```
+backend/eval/reports/asr_capture/<时间>_<会话>.wav   ← 完整音频（可回放核对）
+backend/eval/reports/asr_capture/<时间>_<会话>.json  ← 识别文本 + 时长
+```
+
+**③ 复盘**
+
+```bash
+cd backend/eval && ../.venv/Scripts/python.exe verify_asr_mic_accuracy.py
+#   → 逐条 期望/识别/字准率 + 总体字准率 + 最差 5 条 + reports/asr_mic_accuracy.json
+../.venv/Scripts/python.exe verify_asr_mic_accuracy.py --start T1-02   # 中途接着念
+```
+
+**④ 判读**
+
+| 结果 | 下一步 |
+|---|---|
+| 字准率 **≥95%** | 准确率不是主要矛盾 → 问题在**交互节奏**（静音等待 1.2s / interim 每 600ms 才刷 / 手动结束） |
+| **<95%** 且错例集中在领域词（包邮/运费/尺码） | 上**热词表** |
+| **<95%** 且普遍错 | **two-pass**（端点后用离线模型整句重识别）——先用 `verify_asr_models.py` 确认离线模型确实更准 |
+
+> 采集目录**不要提交进仓库**（真人语音），只提交报告里的数字。
+
 ## 2. 端点阈值（真实环境，验自适应）
 
 | | |

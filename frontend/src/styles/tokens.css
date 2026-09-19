@@ -1,103 +1,134 @@
 /* ============================================================================
-   设计 token · 实时链路控制台
+   设计 token · AI 学习助手（教育皮肤）
    ----------------------------------------------------------------------------
-   主题策略：浅色为默认（企业后台白天办公场景），深色可选（长时间盯监控台）。
+   主题策略：浅色为默认（学习场景白天为主），深色可选（夜间刷题）。
    组件一律只引用变量，不写死颜色 —— 切主题时零改动。
 
-   锚定依据（不是自创审美）：
-   1) 间距/字号：8pt 网格 + 12–14px 正文——LiveKit Agents 控制台、ElevenLabs
-      Conversational AI 面板的会话/延迟视图均为该量级；实时监控台信息密度高，
-      正文小于 12px 不可读，大于 14px 浪费垂直空间。
-   2) 延迟瀑布图：Datadog APM trace span 瀑布（横向 span + 左侧标签 + 右侧时长），
-      这是"每段打点归因"的行业既有形态，PRD FR-07 要求的正是这个可视物。
-   3) 指标数字：tabular-nums + 等宽——Datadog/Grafana/LiveKit 的指标读数一致做法，
-      避免数字跳动时列宽抖动。
-   4) 状态色：实时系统语义色（listening/thinking/speaking/interrupted），
-      单一强调色 + 语义色策略，禁用霓虹渐变与彩色阴影。
+   色值锚定依据（不是自创审美）：
+   1) 主品牌粉 #e8568f：取自本轮教育版设计稿的标题字 / 环形进度 / 折线 / 工具图标。
+      稿件色值用 PIL 对目标区域做「峰值饱和度采样」取得，稿件内实测样本：
+      标题 #ec6190、环形 #e24d82、任务序号圆 #d44578、工具图标 #ee4173
+      → 同一色相带（H≈337°）取中值定为 --brand-500，深/浅档按明度递推。
+   2) 辅助暖橙 #fbaf53：取自稿件「小奈 Pro 报告」卡（权益/升级语义，与主色区分）。
+   3) 页面底色 #f7f4f8 / 卡片近白：取自稿件（page_bg rgb(248,246,250)、卡片 rgb(254,252,253)）。
+   4) 间距/字号：沿用本项目 8pt 网格 + 12–14px 正文（实时监控台与企业后台一致的密度约束）。
+   5) 圆角/阴影按教育稿放大：卡片 14–16px 圆角 + 低透明度粉调柔影（0 2px 12px rgba(214,124,160,.08)），
+      比企业后台 4–8px 更轻——教育产品长时间阅读，硬边框疲劳。
+   6) 状态色（--ok/--warn/--fail、--state-*）保留语义，仅按粉色底重新配明度；
+      指标看板 / 评估台账仍靠这组变量表达验收状态，不进品牌色。
    ========================================================================== */
 
 /* ---------------- 浅色主题（默认） ---------------- */
 :root,
 [data-theme='light'] {
-  --bg-base: #f4f6f8;
+  --bg-base: #f7f4f8;
   --bg-surface: #ffffff;
-  --bg-raised: #f7f8fa;
-  --bg-inset: #eef1f5;
-  --bg-hover: #f0f3f7;
+  --bg-raised: #fffafc;
+  --bg-inset: #fbf1f5;
+  --bg-hover: #fdf2f7;
 
-  --border: #e3e7ec;
-  --border-strong: #cbd2db;
+  --border: #f0e6ec;
+  --border-strong: #e3d2dc;
 
-  --text-primary: #16191f;
-  --text-secondary: #5b6675;
-  --text-tertiary: #8b95a3;
+  --text-primary: #3a2b33;
+  --text-secondary: #7a6672;
+  --text-tertiary: #a896a1;
 
-  --accent: #2f6fed;
-  --accent-dim: rgba(47, 111, 237, 0.1);
-  --accent-border: rgba(47, 111, 237, 0.38);
+  --accent: #e8568f;
+  --accent-dim: rgba(232, 86, 143, 0.1);
+  --accent-border: rgba(232, 86, 143, 0.35);
   --on-accent: #ffffff;
 
-  /* SPEC §4.1 会话状态机语义色 */
-  --state-listening: #2f6fed;
-  --state-thinking: #b57e12;
-  --state-speaking: #17805c;
-  --state-interrupted: #c2483a;
-  --state-error: #c2483a;
-  --state-idle: #8b95a3;
+  /* ---- 教育皮肤扩展色阶（品牌粉 + 辅助暖橙） ---- */
+  --brand-50: #fdf2f7;
+  --brand-100: #fbe3ed;
+  --brand-200: #f8cfe0;
+  --brand-300: #f4a7c3;
+  --brand-500: #e8568f;
+  --brand-600: #d44578;
+  --brand-700: #b83566;
+
+  --warm-50: #fff6e9;
+  --warm-100: #ffeed6;
+  --warm-500: #fbaf53;
+  --warm-600: #f09234;
+
+  /* SPEC §4.1 会话状态机语义色（教育皮肤下的明度重配） */
+  --state-listening: #e8568f;
+  --state-thinking: #d9922a;
+  --state-speaking: #1f9b73;
+  --state-interrupted: #cf5c4a;
+  --state-error: #cf5c4a;
+  --state-idle: #a896a1;
 
   /* PRD §3 验收标准 vs 实测 */
-  --ok: #17805c;
-  --ok-border: rgba(23, 128, 92, 0.42);
-  --warn: #b57e12;
-  --warn-border: rgba(181, 126, 18, 0.42);
-  --fail: #c2483a;
-  --fail-border: rgba(194, 72, 58, 0.45);
+  --ok: #1f9b73;
+  --ok-border: rgba(31, 155, 115, 0.4);
+  --warn: #d9922a;
+  --warn-border: rgba(217, 146, 42, 0.4);
+  --fail: #cf5c4a;
+  --fail-border: rgba(207, 92, 74, 0.42);
 
   /* 视频区遮罩：视频上是深色底，两主题通用 */
-  --overlay-bg: rgba(10, 13, 18, 0.82);
-  --overlay-text: #c9d1dc;
+  --overlay-bg: rgba(28, 18, 24, 0.8);
+  --overlay-text: #e7d7df;
 
-  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-card: 0 2px 12px rgba(214, 124, 160, 0.08);
+  --shadow-pop: 0 8px 28px rgba(214, 124, 160, 0.16);
 }
 
 /* ---------------- 深色主题 ---------------- */
 [data-theme='dark'] {
-  --bg-base: #0e1116;
-  --bg-surface: #151922;
-  --bg-raised: #1b2029;
-  --bg-inset: #0a0d12;
-  --bg-hover: #212734;
+  --bg-base: #14101a;
+  --bg-surface: #1c1620;
+  --bg-raised: #241c28;
+  --bg-inset: #120e17;
+  --bg-hover: #2a2130;
 
-  --border: #262d3a;
-  --border-strong: #344052;
+  --border: #332838;
+  --border-strong: #473a4d;
 
-  --text-primary: #e6e9ef;
-  --text-secondary: #9aa4b2;
-  --text-tertiary: #6b7480;
+  --text-primary: #f2e9ee;
+  --text-secondary: #b3a3ad;
+  --text-tertiary: #85767f;
 
-  --accent: #4c8dff;
-  --accent-dim: rgba(76, 141, 255, 0.14);
-  --accent-border: rgba(76, 141, 255, 0.35);
-  --on-accent: #06101f;
+  --accent: #f2749f;
+  --accent-dim: rgba(242, 116, 159, 0.16);
+  --accent-border: rgba(242, 116, 159, 0.4);
+  --on-accent: #1a0f16;
 
-  --state-listening: #4c8dff;
-  --state-thinking: #d8a13a;
-  --state-speaking: #2fa37a;
-  --state-interrupted: #d96a5a;
-  --state-error: #d94f4f;
-  --state-idle: #6b7480;
+  --brand-50: #2a1b23;
+  --brand-100: #3a2431;
+  --brand-200: #4d2c3d;
+  --brand-300: #8f5471;
+  --brand-500: #f2749f;
+  --brand-600: #e8558a;
+  --brand-700: #c73f70;
 
-  --ok: #2fa37a;
-  --ok-border: rgba(47, 163, 122, 0.45);
-  --warn: #d8a13a;
-  --warn-border: rgba(216, 161, 58, 0.45);
-  --fail: #d96a5a;
-  --fail-border: rgba(217, 106, 90, 0.5);
+  --warm-50: #2f2317;
+  --warm-100: #3d2d1c;
+  --warm-500: #f7b96b;
+  --warm-600: #e8a44f;
 
-  --overlay-bg: rgba(10, 13, 18, 0.82);
-  --overlay-text: #c9d1dc;
+  --state-listening: #f2749f;
+  --state-thinking: #e0a54a;
+  --state-speaking: #3fbf8f;
+  --state-interrupted: #e57a6a;
+  --state-error: #e57a6a;
+  --state-idle: #85767f;
+
+  --ok: #3fbf8f;
+  --ok-border: rgba(63, 191, 143, 0.45);
+  --warn: #e0a54a;
+  --warn-border: rgba(224, 165, 74, 0.45);
+  --fail: #e57a6a;
+  --fail-border: rgba(229, 122, 106, 0.5);
+
+  --overlay-bg: rgba(10, 8, 12, 0.82);
+  --overlay-text: #c9bcc4;
 
   --shadow-card: none;
+  --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.45);
 }
 
 :root {
@@ -118,19 +149,27 @@
   --fs-xl: 20px;
   --fs-display: 28px;
 
-  /* ---- 圆角（企业后台 4–8px） ---- */
-  --r-sm: 4px;
-  --r-md: 6px;
-  --r-lg: 8px;
+  /* ---- 圆角（教育皮肤：卡片 16 / 控件 10–12） ---- */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+  --r-card: var(--r-lg);
 
   /* ---- 字体 ---- */
-  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei',
-    'PingFang SC', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI',
+    'Microsoft YaHei', 'PingFang SC', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas,
     'Liberation Mono', monospace;
 
   --lh-tight: 1.25;
   --lh-base: 1.55;
+
+  /* ---- 骨架尺寸（侧栏教育版加宽放助手卡与工具格） ---- */
+  --side-width: 236px;
+  --content-max: 1280px;
 
   /* ---- 数字人舞台尺寸（2026-09-13 收小：原 9/12 全宽过高） ---- */
   --stage-max-width: 300px;

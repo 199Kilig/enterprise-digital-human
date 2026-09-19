@@ -11,6 +11,7 @@ import json
 import os
 import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional, cast
@@ -31,7 +32,34 @@ from tts.cosyvoice import CosyVoiceTts, TtsError
 
 router = APIRouter(prefix="/api/v1")
 
-app = FastAPI(title="企业级数字人 backend（P1 骨架）")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """启动即**后台预热** ASR 模型（~22s）——修"初次说话毫无反应"。
+
+    为什么必须预热：模型冷启动时 `get_model()` 会阻塞 22s，而前端每 600ms 一片且
+    `await postChunk` 发送 → 冷启动期间所有分片请求全堵在模型加载上，用户感受就是
+    "初次 ASR 完全没反应，试几次才好"（RUNBOOK 坑 8）。
+    预热后用户开口时模型已就绪；用**后台线程**而非 await，避免卡住 uvicorn 启动。
+    预热失败不影响服务（首个请求仍会懒加载，只是慢一次）。
+    """
+    import threading
+
+    def _warm() -> None:
+        try:
+            from asr.streaming import get_model
+
+            t0 = time.perf_counter()
+            get_model()
+            print(f"[asr] 预热完成 {time.perf_counter() - t0:.1f}s", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[asr] 预热失败（不影响服务）: {exc}", flush=True)
+
+    threading.Thread(target=_warm, name="asr-warmup", daemon=True).start()
+    yield
+
+
+app = FastAPI(title="企业级数字人 backend（P1 骨架）", lifespan=_lifespan)
 # include_router 统一放在文件末尾（所有 @router.xxx 之后）。
 # 本版本（FastAPI 0.141.1）的 include_router 是**惰性**的（app.routes 里是一个 `_IncludedRouter`，
 # 请求时才解析），所以放前面也能用；但老版本是快照式（注册那刻 router 里有什么就是什么），

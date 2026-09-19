@@ -4,6 +4,7 @@ import ConsolePage from './pages/ConsolePage'
 import LearningHomePage from './pages/LearningHomePage'
 import LedgerPage from './pages/LedgerPage'
 import MetricsPage from './pages/MetricsPage'
+import StudioPage from './pages/StudioPage'
 import ToolPlaceholderPage from './pages/ToolPlaceholderPage'
 
 /**
@@ -17,6 +18,8 @@ export default function App() {
         <Route index element={<LearningHomePage />} />
         <Route path="/tools/:key" element={<ToolPlaceholderPage />} />
         <Route path="/console" element={<ConsolePage />} />
+        {/* 技术详情（状态机/事件流/延迟瀑布/口型统计）：与学习者界面分开，侧栏「工程视图」入口 */}
+        <Route path="/studio" element={<StudioPage />} />
         <Route path="/metrics" element={<MetricsPage />} />
         <Route path="/ledger" element={<LedgerPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

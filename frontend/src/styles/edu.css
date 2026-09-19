@@ -910,3 +910,391 @@
     align-items: flex-start;
   }
 }
+
+/* ============================================================================
+   学习者对话页（/console）—— 只给观感，不放技术读数
+   技术读数（状态机/事件流/延迟瀑布/token 数）统一在链路工作台 /studio。
+   ========================================================================== */
+.edu-chat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.edu-chat-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+}
+
+.edu-chat-head h1 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--brand-600);
+}
+
+.edu-chat-head p {
+  margin: 6px 0 0;
+  font-size: var(--fs-base);
+  color: var(--text-tertiary);
+}
+
+.edu-chat-head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* 拟人化状态（不出现状态机枚举值） */
+.edu-chat-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 6px var(--sp-3);
+  border-radius: var(--r-pill);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.edu-chat-state.speaking {
+  background: var(--brand-50);
+  border-color: var(--brand-100);
+  color: var(--brand-700);
+}
+
+.edu-chat-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-pill);
+  background: var(--brand-500);
+  box-shadow: 0 0 0 4px var(--accent-dim);
+  animation: edu-pulse 1.8s ease-in-out infinite;
+}
+
+.edu-chat-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: stretch;
+}
+
+/* ---- 形象区 ---- */
+.edu-chat-stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
+}
+
+.edu-chat-stage-media {
+  position: relative;
+  flex: 1;
+  min-height: 380px;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--brand-50);
+  border: 1px solid var(--brand-100);
+}
+
+.edu-chat-stage-media video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 12%;
+  display: block;
+}
+
+/* 讲解时的呼吸光晕：能力信号仍在，只是不用数字表达 */
+.edu-chat-halo {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-lg);
+  border: 2px solid transparent;
+  transition: border-color 0.3s ease;
+  pointer-events: none;
+}
+
+.edu-chat-halo.on {
+  border-color: var(--brand-300);
+  box-shadow: inset 0 0 36px rgba(232, 86, 143, 0.18);
+}
+
+.edu-chat-stage-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.edu-chat-stage-foot .edu-assistant-name {
+  font-size: var(--fs-md);
+}
+
+.edu-chat-mic {
+  flex: 1;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+
+.edu-chat-mic-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--brand-300);
+  transition: width 0.08s linear;
+}
+
+/* ---- 对话区 ---- */
+.edu-chat-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-4);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
+}
+
+.edu-chat-list {
+  flex: 1;
+  min-height: 340px;
+  max-height: 58vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding-right: var(--sp-1);
+}
+
+.edu-chat-intro {
+  margin: auto 0;
+  padding: var(--sp-5) var(--sp-4);
+  text-align: center;
+}
+
+.edu-chat-intro-title {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.edu-chat-intro-sub {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-base);
+  color: var(--text-tertiary);
+  line-height: 1.8;
+}
+
+.edu-bubble-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+
+.edu-bubble-row.user {
+  flex-direction: row-reverse;
+}
+
+.edu-bubble-row.system {
+  justify-content: center;
+}
+
+.edu-bubble-avatar {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-pill);
+  background: var(--brand-50);
+  border: 1px solid var(--brand-100);
+  color: var(--brand-600);
+  font-size: var(--fs-micro);
+}
+
+.edu-bubble {
+  max-width: 76%;
+  padding: 10px var(--sp-3);
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.edu-bubble.digital {
+  border-top-left-radius: var(--r-xs);
+}
+
+.edu-bubble.user {
+  border-top-right-radius: var(--r-xs);
+  background: var(--brand-500);
+  border-color: var(--brand-500);
+  color: var(--on-accent);
+}
+
+.edu-bubble.listening {
+  border-style: dashed;
+  opacity: 0.9;
+}
+
+.edu-bubble.system {
+  max-width: 100%;
+  border-style: dashed;
+  background: var(--bg-inset);
+  color: var(--text-tertiary);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+/* 流式产出的光标：让"正在说"这件事看得见 */
+.edu-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: -2px;
+  background: var(--brand-500);
+  animation: edu-blink 1s steps(2, start) infinite;
+}
+
+@keyframes edu-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.edu-chat-alert {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--brand-50);
+  border: 1px dashed var(--brand-300);
+  color: var(--brand-700);
+  font-size: var(--fs-sm);
+}
+
+.edu-chat-alert-hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-size: var(--fs-micro);
+}
+
+.edu-chat-input {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.edu-chat-input input {
+  flex: 1;
+  min-width: 0;
+  padding: 11px var(--sp-4);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  font-family: inherit;
+}
+
+.edu-chat-input input:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.edu-chat-mic-btn {
+  flex: none;
+  padding: 11px var(--sp-4);
+  border: none;
+  border-radius: var(--r-pill);
+  background: var(--brand-500);
+  color: var(--on-accent);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  box-shadow: 0 6px 16px rgba(214, 124, 160, 0.24);
+}
+
+.edu-chat-mic-btn:hover:not(:disabled) {
+  background: var(--brand-600);
+}
+
+.edu-chat-mic-btn.recording {
+  background: var(--fail);
+  box-shadow: none;
+}
+
+.edu-chat-mic-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.edu-chat-stop {
+  flex: none;
+  padding: 11px var(--sp-3);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
+.edu-chat-stop:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.edu-chat-send {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 11px var(--sp-4);
+  border: none;
+  border-radius: var(--r-pill);
+  background: var(--brand-500);
+  color: var(--on-accent);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.edu-chat-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1080px) {
+  .edu-chat-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .edu-chat-stage-media {
+    min-height: 280px;
+  }
+  .edu-chat-head {
+    flex-direction: column;
+  }
+  .edu-chat-head-actions {
+    margin-left: 0;
+  }
+}

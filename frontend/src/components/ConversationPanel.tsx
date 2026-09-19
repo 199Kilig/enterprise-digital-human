@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ChatMessage } from '../types'
 
-export interface ChatMessage {
-  role: 'user' | 'digital' | 'system'
-  text: string
-  at: number
-}
+export type { ChatMessage }
 
 export default function ConversationPanel({
   messages,

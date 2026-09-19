@@ -116,6 +116,14 @@ export interface LedgerResponse {
   rows: LedgerRow[]
 }
 
+/** 对话消息（前端模型，非后端契约）。role=system 的消息由前端产生：
+ *  链路提示（如"服务端会话已重置"）保留展示；技术读数（`SSE done · tokens …`）只在链路工作台可见。 */
+export interface ChatMessage {
+  role: 'user' | 'digital' | 'system'
+  text: string
+  at: number
+}
+
 /** 链路健康（各模块就绪状态，工作台顶部） */
 export interface HealthResponse {
   api: 'up'

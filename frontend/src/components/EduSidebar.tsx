@@ -28,7 +28,7 @@ const TOOL_ICONS: Record<string, typeof IconTool> = {
 }
 
 const ENG_VIEWS = [
-  { to: '/console', label: '数字人对话', hint: '听→想→说→演 实时链路', Icon: IconBot },
+  { to: '/studio', label: '链路工作台', hint: '技术详情', Icon: IconBot },
   { to: '/metrics', label: '指标看板', hint: '五维验收指标 vs 目标', Icon: IconGauge },
   { to: '/ledger', label: '评估台账', hint: 'eval-history 原始记录', Icon: IconLedger },
 ]

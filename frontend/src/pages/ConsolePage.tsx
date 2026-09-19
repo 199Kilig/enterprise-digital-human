@@ -1,623 +1,190 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, openStream } from '../api/client'
-import AvatarStage, { type StageClip, type StageMeta } from '../components/AvatarStage'
-import ConversationPanel, { type ChatMessage } from '../components/ConversationPanel'
-import EventStreamTable from '../components/EventStreamTable'
-import LatencyWaterfall, { type WfRow } from '../components/LatencyWaterfall'
-import StateStepper from '../components/StateStepper'
-import { useMicCapture, type MicCallbacks } from '../hooks/useMicCapture'
-import { useLipVideo } from '../hooks/useLipVideo'
-import type { MetricsResponse, SessionInfo, SessionState, SseEventType, StreamEvent } from '../types'
-
-/** base64 → 字节（口型片段解码用；片段约数百 KB，逐字符转换可接受）
- *  返回类型显式声明 Uint8Array<ArrayBuffer>：TS 5.7 起 Uint8Array 带 buffer 泛型，
- *  默认的 ArrayBufferLike 不能直接喂给 Blob（SharedArrayBuffer 不兼容）。 */
-function b64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
-  const raw = atob(b64)
-  const out = new Uint8Array(new ArrayBuffer(raw.length))
-  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
-  return out
-}
-
-/** 口型产物：云 GPU MuseTalk 真实推理输出（V-01），随仓库放在 public/media/ */
-const CLIPS: StageClip[] = [
-  {
-    label: 'V-01 normal · 60s 全长（1500 帧）',
-    src: '/media/avatar_v01.mp4',
-    note: '云 GPU 4090 · MuseTalk v1.0 离线批处理 · 输出 704×1216@25fps（跟随输入分辨率）· UNet 6.06 it/s · 峰值显存 4828MiB',
-  },
-  {
-    label: 'V-01 realtime · 8s 短句（199 帧）',
-    src: '/media/avatar_v01_short.mp4',
-    note: '云 GPU 4090 · realtime 模式稳态 19.07fps（52.4ms/帧，RTF 0.763 —— 25fps 预算下每帧差 12.4ms）',
-  },
-]
-
-/** 带 seq 的流式事件类型（SPEC §3.3：媒体事件才有 seq） */
-const SEQ_TYPES: SseEventType[] = ['brain_token', 'tts_audio', 'lip_frame', 'lip_video']
+import { useEffect, useRef, useState } from 'react'
+import { IconPlay, IconSparkle } from '../components/edu/Icons'
+import { STAGE_CLIPS } from '../data/stageClips'
+import { useDuplexSession } from '../hooks/useDuplexSession'
+import type { ChatMessage, SessionState } from '../types'
 
 /**
- * PCM 播放（SPEC §3.5 第 2 条：以音频时钟为基准调度）。
- * TTS 输出 16kHz/16bit 单声道 PCM，逐片排进 Web Audio 时间轴实现"首包即播"。
- */
-interface AudioSink {
-  ctx: AudioContext
-  base: number
-  gain: GainNode // 打断时用它做 20ms 淡出（硬切会产生"咔嗒"爆音）
-  sources: AudioBufferSourceNode[] // 已排期的分片，打断时逐个 stop
-}
-
-/**
- * 本地会话持久化（**轻档**：只存前端）。
+ * 学习者对话页（默认入口 `/console`）
+ * ---------------------------------------------------------------------------
+ * 只给"好观感"：数字人形象 + 对话气泡 + 一个话筒。**不展示**任何技术数据——
+ * 无状态机原文、无 SSE 事件流、无延迟瀑布、无 token/TTFT/口型帧数、无 session_id。
+ * 那些读数统一在链路工作台 `/studio`（侧栏「工程视图」分组内），见 StudioPage。
  *
- * 解决的是"刷新就丢历史"。为什么不直接做服务端持久化：后端会话是进程内内存态
- * （`routes.py` 的 `_sessions`，P1 范围），要做服务端持久化得建表 + 加端点（"重档"）。
- * 这里用 localStorage + 一个存活探测端点，做到：
- *   - 恢复会话命中 → 复用同一 session_id，**后端 ctx.history 还在，多轮上下文连续**
- *   - 恢复失配（后端重启过）→ 新建会话，但**本地历史仍显示**（并明确提示上下文已重置）
- * 只存 user/digital 两类气泡；system 是调试信息，不落盘。
+ * 口径说明：不是"假装链路不存在"，而是把技术读数移出学习者视线——
+ * 状态提示改为拟人化文案（我在听你说 / 小奈正在想 / 小奈正在讲解），
+ * 能力信号仍在（可打断、可语音、有麦克风电平），只是不再以数字形式出现。
  */
-const STORAGE_KEY = 'dh.console.session.v1'
-const PERSIST_LIMIT = 50
 
-interface PersistedSession {
-  sessionId: string
-  messages: ChatMessage[]
+/** 拟人化状态文案（不出现状态机枚举值） */
+const STATE_TEXT: Record<SessionState, string> = {
+  idle: '正在连接…',
+  listening: '我在听你说',
+  thinking: '小奈正在想…',
+  speaking: '小奈正在讲解',
+  interrupted: '已停下，你继续',
+  error: '出了点小问题',
 }
 
-function loadPersisted(): PersistedSession | null {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    const p = JSON.parse(raw) as PersistedSession
-    return p && typeof p.sessionId === 'string' && Array.isArray(p.messages) ? p : null
-  } catch {
-    return null
-  }
+/** 技术读数行（`SSE done · tokens …`）不出现在学习者视图；链路提示（如"会话已重置"）保留。 */
+function isTechnicalLine(m: ChatMessage): boolean {
+  return m.role === 'system' && m.text.startsWith('SSE done')
 }
 
-function savePersisted(p: PersistedSession): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(p))
-  } catch {
-    /* 隐私模式 / 配额满：持久化失败不影响正常使用 */
+/** system 气泡是链路提示：技术原因（后端重启/SSE 中断）留在工作台，学习者视图说人话。 */
+function displayText(m: ChatMessage): string {
+  if (m.role !== 'system') return m.text
+  if (m.text.startsWith('服务端会话已重置')) {
+    return '上面的对话是刚才的记录；我这边重新开始了一轮，我们从现在继续。'
   }
-}
-
-function clearPersisted(): void {
-  try {
-    window.localStorage.removeItem(STORAGE_KEY)
-  } catch {
-    /* 同上 */
+  if (m.text.startsWith('本轮无回复')) {
+    return '我刚才好像没答上来，你把问题再说一遍好吗？'
   }
+  return m.text
 }
 
 export default function ConsolePage() {
-  const [session, setSession] = useState<SessionInfo | null>(null)
-  const [state, setState] = useState<SessionState>('idle')
-  const [events, setEvents] = useState<StreamEvent[]>([])
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [streamText, setStreamText] = useState<string | null>(null)
-  const [lastTurn, setLastTurn] = useState<{ ttft: number | null; total: number; tokens: number } | null>(null)
-  const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const s = useDuplexSession()
+  const [draft, setDraft] = useState('')
+  const listRef = useRef<HTMLDivElement>(null)
 
-  const closeRef = useRef<null | (() => void)>(null)
-  const t0Ref = useRef(0)
-  const seqRef = useRef<Record<string, number>>({})
-  const bufRef = useRef('')
-  const audioRef = useRef<AudioSink | null>(null)
-  const [audioStats, setAudioStats] = useState<{ chunks: number; ms: number; words: number } | null>(null)
-  const [liveText, setLiveText] = useState('')
-  const [micLevel, setMicLevel] = useState(0)
-  const micCbRef = useRef<MicCallbacks | null>(null)
-  const bargeAtRef = useRef(0)
-  // 打断静默期：/interrupt 发出后到新一轮开始前，丢弃**在途到达**的音频/口型分片。
-  // 为什么需要：关流是异步的，打断瞬间可能已有 1~2 个 tts_audio 事件在队列里，
-  // 不丢弃会在 stopPlayback() 之后重建 AudioSink 继续出声（症状："停完又蹦半句"）。
-  const mutedRef = useRef(false)
-  const {
-    recording,
-    monitoring,
-    start: startMic,
-    stop: stopMic,
-    stopMonitor,
-  } = useMicCapture(session?.session_id ?? null, micCbRef)
-
-  /** 音频时钟（ms，相对本轮回答起点）：口型片段的排期基准（SPEC §3.5 2b） */
-  const audioClockMs = useCallback(() => {
-    const sink = audioRef.current
-    if (!sink) return null
-    return (sink.ctx.currentTime - sink.base) * 1000
-  }, [])
-  const { current: lipClip, stats: lipStats, enqueue: enqueueLip, reset: resetLip } = useLipVideo(audioClockMs)
-
-  /** 把一片 base64 PCM 排进播放时间轴（首片建立时间基准） */
-  const playPcmChunk = useCallback((b64: string, startMs: number) => {
-    const raw = atob(b64)
-    const bytes = new Uint8Array(raw.length)
-    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
-    const i16 = new Int16Array(bytes.buffer, 0, bytes.length >> 1)
-
-    let sink = audioRef.current
-    if (!sink) {
-      const ctx = new AudioContext()
-      const gain = ctx.createGain()
-      gain.connect(ctx.destination)
-      sink = { ctx, base: ctx.currentTime + 0.15, gain, sources: [] } // 150ms 起播余量，避免首片被丢弃
-      audioRef.current = sink
-    }
-    const buffer = sink.ctx.createBuffer(1, i16.length, 16000)
-    const ch = buffer.getChannelData(0)
-    for (let i = 0; i < i16.length; i++) ch[i] = i16[i] / 32768
-    const src = sink.ctx.createBufferSource()
-    src.buffer = buffer
-    src.connect(sink.gain) // 经 gain 才可淡出
-    src.start(sink.base + startMs / 1000)
-    sink.sources.push(src)
-    src.onended = () => {
-      const k = sink.sources.indexOf(src)
-      if (k >= 0) sink.sources.splice(k, 1)
-    }
-  }, [])
-
-  /**
-   * 打断时立刻停止播放 —— DESIGN-打断 §3.3 规则3 的前端清理协议。
-   *
-   * 为什么必须淡出而不是直接 close：波形被硬切会发出"咔嗒"爆音，停止要干净
-   * （DESIGN 规则3「允许当前分片播完」的用意就是不产生爆音，这里用 20ms 淡出等效且更快）。
-   * 为什么必须显式 stop 已排期的 source：`src.start(base + startMs/1000)` 是**排到时间轴上**的，
-   * 不 stop 就会继续播完 —— 这正是"插话了但数字人还在说"的直接原因。
-   */
-  const stopPlayback = useCallback(() => {
-    const sink = audioRef.current
-    if (!sink) return
-    audioRef.current = null
-    try {
-      const now = sink.ctx.currentTime
-      sink.gain.gain.cancelScheduledValues(now)
-      sink.gain.gain.setValueAtTime(sink.gain.gain.value, now)
-      sink.gain.gain.linearRampToValueAtTime(0, now + 0.02)
-      for (const s of sink.sources) {
-        try {
-          s.stop(now + 0.02)
-        } catch {
-          /* 已自然结束的 source 调 stop 会抛，忽略 */
-        }
-      }
-    } catch {
-      /* 音频上下文异常不应阻塞打断流程 */
-    }
-    window.setTimeout(() => void sink.ctx.close().catch(() => undefined), 80) // 等淡出跑完再关
-  }, [])
-
-  // 指标（延迟预算 / 产物信息）：全部来自 eval/reports 真实报告
-  useEffect(() => {
-    api.metrics().then(setMetrics).catch((e: Error) => setError(e.message))
-  }, [])
-
-  /** 建立会话。默认先尝试恢复 localStorage 里的会话；`fresh: true` 强制清空重开。 */
-  const resetSession = useCallback(async (opts?: { fresh?: boolean }) => {
-    closeRef.current?.()
-    setEvents([])
-    setStreamText(null)
-    setLastTurn(null)
-    setError(null)
-    seqRef.current = {}
-    bufRef.current = ''
-    mutedRef.current = false
-    resetLip()
-
-    const saved = opts?.fresh ? null : loadPersisted()
-    if (opts?.fresh) {
-      setMessages([])
-      clearPersisted()
-    }
-
-    if (saved) {
-      setMessages(saved.messages) // 先恢复历史：用户立刻看到上一轮的对话
-      try {
-        const probe = await api.getSession(saved.sessionId)
-        setSession({ session_id: probe.session_id, created_at: probe.created_at })
-        t0Ref.current = Date.now()
-        setState('listening')
-        return // 复用成功：后端上下文（ctx.history）也在，多轮连续
-      } catch {
-        // 后端重启过 → 旧会话失效，但本地历史保留（下面新建会话）
-        setMessages((m) => [
-          ...m,
-          {
-            role: 'system',
-            at: Date.now(),
-            text: '服务端会话已重置（后端重启动过）：以上历史仅供查看，多轮上下文从本轮重新开始',
-          },
-        ])
-      }
-    }
-
-    try {
-      const s = await api.createSession()
-      setSession(s)
-      t0Ref.current = Date.now()
-      setState('listening')
-    } catch (e) {
-      setError((e as Error).message)
-      setState('error')
-    }
-  }, [])
+  const visible = s.messages.filter((m) => !isTechnicalLine(m))
+  const busy = s.state === 'thinking'
+  const speaking = s.state === 'speaking'
 
   useEffect(() => {
-    void resetSession()
-    return () => closeRef.current?.()
-  }, [resetSession])
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
+  }, [visible.length, s.streamText])
 
-  // 会话 + 对话历史落 localStorage（轻档持久化）：刷新/重开页面后恢复显示
-  useEffect(() => {
-    if (!session) return
-    const keep = messages.filter((m) => m.role !== 'system').slice(-PERSIST_LIMIT)
-    savePersisted({ sessionId: session.session_id, messages: keep })
-  }, [session, messages])
-
-  /** 把"已产出但尚未落地"的部分回复落成正式消息。
-   *
-   * 为什么必须有：回复文本是逐 token 显示在临时的 `streamText` 里，**只有 `done` 事件才会把它
-   * 落进 messages**。一旦 `done` 到不了——被**打断**（`handleInterrupt` 关流）、或 SSE 传输中断
-   * （`client.ts` 的 onerror 也会关流）——`streamText` 会在下一轮 `sendTurn` 的 `setStreamText('')`
-   * 里被清掉，而它从未进过 messages → 用户看到"上一轮的回复凭空消失"（实测现象）。
-   * 宁可留下带标记的半句，也不能让它消失。
-   */
-  const flushPartial = useCallback((reason: string) => {
-    const partial = bufRef.current.trim()
-    setStreamText(null)
-    if (partial) {
-      setMessages((m) => [...m, { role: 'digital', text: `${partial}（${reason}）`, at: Date.now() }])
-    }
-  }, [])
-
-  /** 一轮对话：文本 → SSE（真实 ASR端点 → DeepSeek 流式） */
-  const sendTurn = useCallback(
-    (text: string) => {
-      if (!session) return
-      closeRef.current?.()
-
-      setMessages((m) => [...m, { role: 'user', text, at: Date.now() }])
-      bufRef.current = ''
-      setStreamText('')
-      setState('thinking')
-      seqRef.current = {}
-      t0Ref.current = Date.now()
-      setAudioStats(null)
-      mutedRef.current = false // 新一轮：解除打断静默期
-      stopPlayback() // 上一轮若还在播（含打断后残留），先干净停掉
-
-      closeRef.current = openStream(
-        session.session_id,
-        {
-          onEvent: (type: SseEventType, payload: Record<string, unknown>) => {
-            const atMs = Date.now() - t0Ref.current
-            const seq = typeof payload.seq === 'number' ? payload.seq : null
-
-            // seq 连续性校验（SPEC §3.5 第 3 条）：每种媒体流各自计数
-            let seqGap = false
-            if (seq !== null && SEQ_TYPES.includes(type)) {
-              const last = seqRef.current[type]
-              seqGap = last !== undefined && seq !== last + 1
-              seqRef.current[type] = seq
-            }
-            setEvents((list) => [
-              ...list,
-              { seq: list.length, type, atMs, payload, seqGap },
-            ])
-
-            if (type === 'thinking') setState('thinking')
-            else if (type === 'brain_token') {
-              bufRef.current += String(payload.token ?? '')
-              setStreamText(bufRef.current)
-            } else if (type === 'interrupted') {
-              // 后端已确认打断：本地立刻停播 + 停口型（不等 /interrupt 往返）
-              mutedRef.current = true // 静默期：丢弃在途分片
-              stopPlayback()
-              resetLip()
-              setState('interrupted')
-            }
-            else if (type === 'tts_audio') {
-              if (mutedRef.current) return // 打断静默期：丢弃在途音频
-              setState('speaking')
-              const b64 = String(payload.audio_b64 ?? '')
-              const startMs = Number(payload.start_ms ?? 0)
-              if (b64) {
-                playPcmChunk(b64, startMs)
-                const ms = Number(payload.end_ms ?? 0)
-                const w = (payload.words as unknown[] | undefined)?.length ?? 0
-                setAudioStats((s) => ({
-                  chunks: (s?.chunks ?? 0) + 1,
-                  ms: Math.max(s?.ms ?? 0, ms),
-                  words: (s?.words ?? 0) + w,
-                }))
-              } else {
-                // 仅有词时间戳、无音频的尾包
-                const w = (payload.words as unknown[] | undefined)?.length ?? 0
-                setAudioStats((s) => ({ chunks: s?.chunks ?? 0, ms: s?.ms ?? 0, words: (s?.words ?? 0) + w }))
-              }
-            } else if (type === 'lip_frame') {
-              if (mutedRef.current) return // 打断静默期：丢弃在途口型帧
-              setState('speaking')
-            } else if (type === 'lip_video') {
-              // ADR-005 默认路径：整句 H.264 片段，按音频时钟排队播放
-              if (mutedRef.current) return // 打断静默期：丢弃在途口型片段
-              setState('speaking')
-              const b64 = String(payload.video_b64 ?? '')
-              if (b64) {
-                const bytes = b64ToBytes(b64)
-                const url = URL.createObjectURL(new Blob([bytes], { type: 'video/mp4' }))
-                enqueueLip({
-                  seq: Number(payload.seq ?? 0),
-                  startMs: Number(payload.start_ms ?? 0),
-                  durationMs: Number(payload.duration_ms ?? 0),
-                  nFrames: Number(payload.n_frames ?? 0),
-                  fps: Number(payload.fps ?? 25),
-                  url,
-                  bytes: bytes.length,
-                  lateMs: null,
-                })
-              }
-            } else if (type === 'error') {
-              setState('error')
-              setError(`${payload.code}: ${payload.message}`)
-              // 已产出的 token 落成正式消息：否则下一轮 sendTurn 清空 streamText 时它会凭空消失
-              const partial = bufRef.current.trim()
-              if (partial) setMessages((m) => [...m, { role: 'digital', text: partial, at: Date.now() }])
-              setStreamText(null)
-              stopPlayback()
-              closeRef.current?.()
-            } else if (type === 'done') {
-              closeRef.current?.() // 一轮结束即关流，避免 EventSource 自动重连
-              // 占位流（无 text 的空跑 / 断线重连）不是一轮真实回答：直接忽略，别污染消息列表
-              if (payload.placeholder === true) return
-              const answer = String(payload.answer ?? bufRef.current ?? '')
-              if (answer) {
-                setMessages((m) => [...m, { role: 'digital', text: answer, at: Date.now() }])
-              } else {
-                // 不能静默：此前 answer 为空时什么都不做 → 用户看到"这一轮凭空消失"（实测现象）
-                setMessages((m) => [
-                  ...m,
-                  {
-                    role: 'system',
-                    at: Date.now(),
-                    text: '本轮无回复（SSE 连接中断或空占位流）—— 若反复出现请看右侧事件表',
-                  },
-                ])
-              }
-              setStreamText(null)
-              const ttft = typeof payload.ttft_ms === 'number' ? payload.ttft_ms : null
-              const total = Number(payload.duration_ms ?? atMs)
-              const tokens = Number(payload.tokens ?? 0)
-              const ttsFirst = payload.tts_first_packet_ms ?? '—'
-              const ttsWords = Number(payload.tts_words ?? 0)
-              setLastTurn({ ttft, total, tokens })
-              setState((payload.state_after as SessionState) ?? 'listening')
-              setMessages((m) => [
-                ...m,
-                {
-                  role: 'system',
-                  at: Date.now(),
-                  text: `SSE done · tokens ${tokens} · LLM TTFT ${ttft ?? '—'}ms · TTS 首包 ${ttsFirst}ms · word 时间戳 ${ttsWords} 个 · 总耗时 ${total}ms · state_after=${
-                    payload.state_after ?? '?'
-                  } · audio 分片 ${payload.total_seq_audio ?? 0} / 口型帧 ${payload.total_seq_lip ?? 0}`,
-                },
-              ])
-            }
-          },
-          onError: (e) => {
-            setError(e.message)
-            flushPartial('连接中断') // 同样：done 不会来了，已产出的不能丢
-          },
-        },
-        text,
-      )
-    },
-    [session, stopPlayback, resetLip, flushPartial],
-  )
-
-  /** 打断：本地立刻停播/停口型/关流，再通知后端（DESIGN-打断 §3.3 规则3）。 */
-  const handleInterrupt = async () => {
-    if (!session) return
-    mutedRef.current = true // ① 静默期：丢弃在途分片（防止停播后又重建播放器出声）
-    stopPlayback() // ② 数字人立刻闭嘴，不等后端往返
-    resetLip() // ② 口型片段也停
-    closeRef.current?.() // ③ 关流：不再接收新分片（后端也会因 stop_requested 停止产出）
-    closeRef.current = null
-    flushPartial('已被打断') // ④ 已产出的半句必须落地：done 不会再来了
-    await api.interrupt(session.session_id).catch((e: Error) => setError(e.message))
-    setState('interrupted')
-    window.setTimeout(() => {
-      void api.interruptDone(session.session_id).catch(() => undefined)
-      setState('listening')
-    }, 600)
+  const submit = () => {
+    const t = draft.trim()
+    if (!t) return
+    s.sendTurn(t)
+    setDraft('')
   }
 
-  const budget: WfRow[] = (metrics?.latency_budget ?? []).map((b) => ({
-    key: b.key,
-    label: b.label,
-    ms: b.measured_ms,
-    targetMs: b.target_ms,
-    note: b.note,
-  }))
-
-  const rt = metrics?.runtime
-  const stageMeta: StageMeta[] = [
-    { label: 'LLM', value: 'deepseek-chat（真实）' },
-    { label: '本轮 LLM TTFT', value: lastTurn?.ttft != null ? `${lastTurn.ttft}ms` : '—' },
-    { label: '本轮 tokens', value: lastTurn ? String(lastTurn.tokens) : '—' },
-    { label: 'TTS', value: 'cosyvoice-v2（真实）' },
-    { label: '本轮音频', value: audioStats ? `${(audioStats.ms / 1000).toFixed(2)}s / ${audioStats.words} 词` : '—' },
-    { label: '口型', value: '未接入' },
-    { label: '分辨率', value: rt?.output_resolution ?? '—' },
-    { label: '峰值显存', value: rt?.peak_vram_mib ? `${rt.peak_vram_mib} MiB` : '—' },
-  ]
-
-  const convMessages = streamText
-    ? [...messages, { role: 'digital' as const, text: streamText, at: Date.now() }]
-    : messages
-
-  // 麦克风回调（ADR-004：前端做端点与打断；远端只做识别）
-  useEffect(() => {
-    micCbRef.current = {
-      onInterim: (t) => setLiveText(t),
-      onEndpoint: (t) => {
-        setLiveText('')
-        sendTurn(t)
-      },
-      onLevel: (r) => setMicLevel(r),
-      onBargeIn: () => {
-        const now = Date.now()
-        if (state !== 'speaking' || now - bargeAtRef.current < 2000) return
-        bargeAtRef.current = now
-        void handleInterrupt()
-      },
-      onError: (m) => setError(m),
-    }
-  })
-
-  // FR-06 自动打断：数字人播报期间保持麦克风监听（barge 模式，只跑 VAD、不上行音频）。
-  // 为什么必须单独开一路：对话采集在静音端点后即释放音轨，不重新监听就永远采集不到插话，
-  // 自动打断会退化成"只有手动按钮"（见 PROGRESS-2026-09-15 的阻塞节）。
-  // 监听期间必须不上行音频，否则数字人自己的声音会被当成用户说话送进 ASR。
-  const wantBargeRef = useRef(false)
-  useEffect(() => {
-    const wantBarge = state === 'speaking' && !recording
-    wantBargeRef.current = wantBarge
-    if (wantBarge) {
-      // start 是异步的（getUserMedia + worklet）：**完成后必须再核对一次期望值**。
-      // 否则播报很快结束时会「start 还没落地、清理已经跑过」——monitoring 那时还是 false，
-      // 下面的分支不会调 stopMonitor，于是这次监听再没人释放 → modeRef 永远非 null
-      // → 之后麦克风再也开不起来（实测现象："只能用一次"）。
-      void startMic('barge').then(() => {
-        if (!wantBargeRef.current) void stopMonitor()
-      })
-    } else {
-      void stopMonitor() // 内部自带守卫（非 barge 直接返回），无条件调用是安全的
-    }
-  }, [state, recording, monitoring, startMic, stopMonitor])
+  const stageSrc = s.lipClip?.url ?? STAGE_CLIPS[0].src
 
   return (
-    <div className="stack">
-      <div className="page-head">
+    <div className="edu-chat">
+      <header className="edu-chat-head">
         <div>
-          <h1>会话工作台</h1>
-          <div className="desc">
-            听→想→说→演 四段流水线的实时视图：会话状态机（SPEC §4.1）、SSE 事件流（§3.3）、
-            延迟打点瀑布（PRD FR-07）。所有读数来自后端真实接口与实测报告，未接入段明确标注。
-          </div>
+          <h1>
+            <IconSparkle size={18} />
+            和 小奈 一起学
+          </h1>
+          <p>点下面的话筒问我问题，也可以直接打字。我讲得不对、或者你想插话，随时打断我。</p>
         </div>
-        <div className="topbar-meta">
-          <span className="kv">
-            <span className="muted">session</span>
-            <span className="num">{session ? session.session_id.slice(0, 8) : '—'}</span>
+        <div className="edu-chat-head-actions">
+          <span className={`edu-chat-state${speaking ? ' speaking' : ''}`}>
+            <span className="edu-chat-dot" />
+            {STATE_TEXT[s.state]}
           </span>
+          <button className="edu-ghost" onClick={() => void s.resetSession({ fresh: true })}>
+            重新开始
+          </button>
         </div>
-      </div>
+      </header>
 
-      {error && (
-        <div className="notice">
-          <strong>链路错误</strong>
-          <span>{error}</span>
-        </div>
-      )}
-
-      <StateStepper state={state} speakingActive={state === 'speaking'} />
-
-      <div className="grid-2">
-        <div className="stack">
-          <div className="panel">
-            <div className="panel-head">
-              <h2>数字人舞台</h2>
-              <span className="hint">产物：云 GPU MuseTalk 推理输出（V-01）</span>
-              <div className="grow" />
-              <span className="badge">{rt?.gpu ?? 'GPU 未记录'}</span>
-            </div>
-            <div className="panel-body">
-              <AvatarStage
-                state={state}
-                sessionId={session?.session_id ?? null}
-                clips={CLIPS}
-                liveClip={lipClip}
-                lipStats={lipStats}
-                meta={stageMeta}
-                canInterrupt={state === 'speaking'}
-                onInterrupt={handleInterrupt}
-                onReconnect={() => void resetSession({ fresh: true })}
-              />
-            </div>
+      <div className="edu-chat-grid">
+        {/* ---- 数字人形象（真实产物：MuseTalk 口型视频；无实时片段时回落到 V-01 产物） ---- */}
+        <section className="edu-chat-stage">
+          <div className="edu-chat-stage-media">
+            <video
+              key={stageSrc}
+              src={stageSrc}
+              autoPlay={!!s.lipClip}
+              loop={!s.lipClip}
+              muted={!!s.lipClip}
+              playsInline
+            />
+            <div className={`edu-chat-halo${speaking ? ' on' : ''}`} />
           </div>
-
-          <div className="panel">
-            <div className="panel-head">
-              <h2>延迟打点瀑布</h2>
-              <span className="hint">目标值见 DESIGN §5.1 延迟预算</span>
-              <div className="grow" />
-              <span className="badge">{metrics ? `${metrics.reports_found.length} 份报告` : '加载中'}</span>
-            </div>
-            <div className="panel-body">
-              <LatencyWaterfall rows={budget} />
-            </div>
-          </div>
-        </div>
-
-        <div className="stack">
-          <div className="notice info">
-            <strong>链路现状</strong>
-            <span>
-              <b>「想」「说」已接真实服务</b>：DeepSeek 流式（TTFT 打点 + 多轮上下文）→
-              CosyVoice v2 流式合成（16k PCM 首包即播 + word 级时间戳）。
-              一轮结束状态机走完整转移（thinking → speaking → listening）。
-              <b>「演」未接入</b>：舞台上播放的是云 GPU V-01 预生成产物，尚未与本轮音频做口型对齐
-              （口型帧调度将以 TTS 时间戳为时钟基准，见 SPEC §4.3）。
+          <div className="edu-chat-stage-foot">
+            <span className="edu-assistant-name">
+              小奈 <span className="edu-tag-ai">AI</span>
+            </span>
+            <span className="edu-chat-mic" title="麦克风电平">
+              <span className="edu-chat-mic-fill" style={{ width: `${Math.min(100, s.micLevel * 400)}%` }} />
             </span>
           </div>
+        </section>
 
-          <div className="panel">
-            <div className="panel-head">
-              <h2>对话</h2>
-              <span className="hint">文本输入（语音上行见 P2）</span>
+        {/* ---- 对话 ---- */}
+        <section className="edu-chat-side">
+          <div className="edu-chat-list" ref={listRef}>
+            {visible.length === 0 && !s.recording && (
+              <div className="edu-chat-intro">
+                <div className="edu-chat-intro-title">今天想从哪里开始？</div>
+                <div className="edu-chat-intro-sub">
+                  比如问我：「通分是什么意思」「这道分数题我卡住了」「帮我出两道练习题」
+                </div>
+              </div>
+            )}
+
+            {visible.map((m, i) => (
+              <div className={`edu-bubble-row ${m.role}`} key={`${m.at}-${i}`}>
+                {m.role !== 'system' && (
+                  <span className="edu-bubble-avatar">{m.role === 'user' ? '我' : '奈'}</span>
+                )}
+                <div className={`edu-bubble ${m.role}`}>{displayText(m)}</div>
+              </div>
+            ))}
+
+            {s.recording && (
+              <div className="edu-bubble-row user">
+                <span className="edu-bubble-avatar">我</span>
+                <div className="edu-bubble user listening">{s.liveText || '（我在听…）'}</div>
+              </div>
+            )}
+
+            {s.streamText !== null && s.streamText !== '' && (
+              <div className="edu-bubble-row digital">
+                <span className="edu-bubble-avatar">奈</span>
+                <div className="edu-bubble digital typing">
+                  {s.streamText}
+                  <span className="edu-caret" />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {s.error && (
+            <div className="edu-chat-alert">
+              链路出了点问题：{s.error}
+              <span className="edu-chat-alert-hint">详细读数见侧栏「工程视图 → 链路工作台」</span>
             </div>
-            <ConversationPanel
-              messages={convMessages}
-              disabled={!session || state === 'thinking'}
-              recording={recording}
-              liveText={liveText}
-              micLevel={micLevel}
-              onSend={sendTurn}
-              onMicToggle={() => {
-                // 两侧都清 liveText：结束侧清掉"没说话就点结束"时的残留（那种情况下
-                // onEndpoint 不会被调用，不会清）；开始侧清掉上一轮的残影。
-                setLiveText('')
-                if (recording) {
-                  stopMic()
-                  return
-                }
-                // ① 先让数字人彻底闭嘴再开麦克风。**不能只开麦**：若数字人还在播（或播尾音），
-                //    麦克风会把扬声器里的上一轮回答收进去——AEC 在外放/大音量下消不干净——
-                //    ASR 就把旧内容识别成本轮输入，LLM 照着再答一遍，
-                //    用户看到"第二轮回答的开头重复了上一轮的内容"（实测现象）。
-                //    无条件调用（不只限 speaking）：状态可能已回 listening，但前端播放队列里仍有余音。
-                stopPlayback()
-                // ② 仍在播报态时按语义通知后端打断（DESIGN-打断 §3.3 规则3）
-                if (state === 'speaking') void handleInterrupt()
-                // ③ 再开麦克风
-                void startMic()
-              }}
+          )}
+
+          <div className="edu-chat-input">
+            <button
+              className={`edu-chat-mic-btn${s.recording ? ' recording' : ''}`}
+              onClick={s.toggleMic}
+              disabled={!s.session || busy}
+              title={s.recording ? '点击结束并发送' : '点击开始语音输入（停顿约 1.2 秒自动结束）'}
+            >
+              {s.recording ? '结束并发送' : '开始提问'}
+            </button>
+
+            {speaking && (
+              <button className="edu-chat-stop" onClick={() => void s.interrupt()} title="让数字人停下">
+                让她停下
+              </button>
+            )}
+
+            <input
+              value={draft}
+              placeholder="或直接打字提问…"
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+              disabled={!s.session || busy}
             />
+            <button className="edu-chat-send" onClick={submit} disabled={!s.session || busy}>
+              <IconPlay size={13} />
+              发送
+            </button>
           </div>
-
-          <div className="panel">
-            <div className="panel-head">
-              <h2>SSE 事件流</h2>
-              <span className="hint">seq 连续性是丢包检测依据（SPEC §3.5）</span>
-            </div>
-            <EventStreamTable events={events} />
-          </div>
-        </div>
+        </section>
       </div>
     </div>
   )

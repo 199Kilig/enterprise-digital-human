@@ -592,8 +592,20 @@ export default function ConsolePage() {
                 // 两侧都清 liveText：结束侧清掉"没说话就点结束"时的残留（那种情况下
                 // onEndpoint 不会被调用，不会清）；开始侧清掉上一轮的残影。
                 setLiveText('')
-                if (recording) stopMic()
-                else void startMic()
+                if (recording) {
+                  stopMic()
+                  return
+                }
+                // ① 先让数字人彻底闭嘴再开麦克风。**不能只开麦**：若数字人还在播（或播尾音），
+                //    麦克风会把扬声器里的上一轮回答收进去——AEC 在外放/大音量下消不干净——
+                //    ASR 就把旧内容识别成本轮输入，LLM 照着再答一遍，
+                //    用户看到"第二轮回答的开头重复了上一轮的内容"（实测现象）。
+                //    无条件调用（不只限 speaking）：状态可能已回 listening，但前端播放队列里仍有余音。
+                stopPlayback()
+                // ② 仍在播报态时按语义通知后端打断（DESIGN-打断 §3.3 规则3）
+                if (state === 'speaking') void handleInterrupt()
+                // ③ 再开麦克风
+                void startMic()
               }}
             />
           </div>

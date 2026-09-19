@@ -339,6 +339,23 @@ python backend/eval/verify_e2e_lip.py "运费怎么算"
 > 37 帧 / 触发 17 次（`asr_mic_check.md` §3），AEC 是该设计成立的前提且**必须人工实测**（§5 第 4 项）。
 > 实测方法：让数字人说一段长回答、**期间完全不说话**，看状态条是否跳「被打断」。
 
+**④ "第二轮的回答开头重复上一轮内容" —— 麦克风把扬声器回放收进了 ASR**
+
+症状：第一轮问「能听到吗？」，第二轮提问时数字人**开头又答了一遍「能听到的」**。
+
+**后端侧已排除**（实测）：第二轮 TTS 的 `start_ms` 从 **0** 重新开始（没接着上一轮），词文本全是本轮内容
+（无「能听到」），`done.answer` 也是本轮问题。串的不是后端。
+
+真因：按下「说话」时**只开麦克风、没让数字人闭嘴**。若数字人还在播（或播尾音），麦克风就把扬声器里的
+上一轮回答收进去——`echoCancellation: true` 在**外放/大音量**下消不干净——ASR 把旧内容识别成本轮输入
+→ LLM 照着再答一遍。
+
+修法（`onMicToggle`）：开麦前 ① `stopPlayback()`（**无条件**：状态可能已回 `listening`，但前端播放队列
+里仍有余音）② `state === 'speaking'` 时 `handleInterrupt()`（语义上按「说话」本就该打断）。
+
+> 这是**外放 + AEC 不足**的**第二种**表现（第一种是本节 ① 的自打断）。两者指向同一结论：
+> **AEC 是这套打断设计成立的前提**。外放场景必须解决（戴耳机 / 回声门控 / ADR-004 的 P2 VAD 迁后端）。
+
 ## 4. 模型与下载源
 
 - 模型权重国内优先 **ModelScope**（DESIGN §5.4 坑 2）：FunASR（paraformer-zh-streaming + fsmn-vad）、CosyVoice2、MuseTalk 权重
@@ -358,6 +375,7 @@ python backend/eval/verify_e2e_lip.py "运费怎么算"
 | 2026-09-14 | **接入语音输入（ASR）**：`asr/streaming.py` + `POST /api/v1/asr/chunk` + 前端 AudioWorklet 采集与前端 VAD（ADR-004）；真实测试集 7 条识别全对；打断（FR-06）随之可用（踩坑 8~11） |
 | 2026-09-14 | **口型服务化落地（云 GPU）**：`deploy/lip_service.py`（常驻模型+avatar、去逐帧落盘、JPEG 直出）+ 本机 `lip/musetalk_engine.py` 客户端 + SSE `lip_frame` 事件流 + SSH 隧道；端到端 184 帧验证通过。**关键实测：GPU 生成 92fps（V-01 的 19.07 是 I/O 瓶颈）、隧道仅 0.96MB/s、H.264 比逐帧 JPEG 小 41×**（踩坑 14~19，报告 eval/reports/lip_service_check.md） |
 | 2026-09-17 | **会话持久化 + 契约/并发硬化**：新增 `GET /api/v1/session/{id}` 存活探测；前端 localStorage 恢复会话与历史（后端重启则保留历史并提示上下文已重置）；口型队列背压（`lip.queue_max`）+ `done.lip_dropped`（SPEC v1.8）；`POST /asr/chunk` 补 HTTP 契约 + `seq` 语义（SPEC v1.9） |
+| 2026-09-17 | **修"第二轮重复上一轮内容"（§3.17 ④）**：按「说话」只开麦没让数字人闭嘴 → 麦克风收进扬声器回放 → ASR 把旧内容当本轮输入；改为开麦前先 `stopPlayback()`（无条件）+ 播报态下 `handleInterrupt()` |
 | 2026-09-17 | **修"上一轮回复凭空消失"（§3.17 ③）**：回复只在 `done` 时落地，打断/断流路径不落地已被产出文本 → 新增 `flushPartial` 在打断与连接中断时把半句落成消息 |
 | 2026-09-17 | **修两个真机才暴露的缺陷（§3.17）**：① `useMicCapture` 异步 start 撞只读守卫 → "识别只能用一次"（epoch + 抢占 + 完成后核对）；② ASR 冷启动 22s → "初次说话无反应"（lifespan 后台预热，实测首片 227ms） |
 | 2026-09-17 | **配置中心收口（§3.16）**：`asr` 段 6 字段代码从不读取且 `chunk_size` 值与实现不符 → `model`/`chunk_size` 接回代码、删除 4 个名义项；顺带修正 DESIGN 目录图（`vad/` 已删） |

@@ -23,7 +23,9 @@ from pydantic import BaseModel
 from api.state_machine import SessionStateMachine, StateEvent, StateMachineError
 from asr.streaming import AsrError, StreamingAsr
 from brain.llm import BrainError, DeepSeekBrain
+from brain.persona import build_system_prompt
 from brain.segmenter import SentenceSplitter
+from brain.text_clean import clean_for_tts
 from config import load_config
 from constants import BYTES_PER_MS, bytes_to_ms
 from lip import LipServiceError, build_lip_engine
@@ -293,13 +295,12 @@ def asr_chunk(req: AsrChunkRequest) -> dict:
 # ---- SSE 事件流（SPEC §3）----
 # P1 扩展：text 查询参数为文本输入通道（SPEC §3.1 原设计音频走 WebRTC DataChannel；
 # 语音上行未接入前，用 text 驱动同一事件流。属新增可选参数，不破坏既有契约）。
-_BRAIN_SYSTEM_PROMPT = (
-    "你是电商零售企业的实时客服数字人助手，名字叫小顾。"
-    "用简体中文口语化回答，一次回复控制在两句话以内——你的回答会被实时合成语音并由数字人说出，"
-    "过长会明显增加用户等待。"
-    "涉及运费、退货、发货时效、商品参数等售前售后问题：不确定的政策绝不编造，"
-    "明确说明需要人工客服进一步核实。"
-)
+# 系统人格（config.yaml llm.persona 驱动，默认 teacher=教育辅导；见 brain/persona.py）
+_SYSTEM_PROMPT = build_system_prompt()
+
+# TTS 文本清理诊断日志（默认关）：TTS_DEBUG=1 时打印清理前后的差异，
+# 用来确认"喂给 TTS 的到底是不是干净文本"——不能只靠读代码下结论。
+_TTS_DEBUG = os.environ.get("TTS_DEBUG", "") == "1"
 
 
 
@@ -349,7 +350,7 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
         # ---- 2) 流水线：LLM 生产者 → 句子队列 → TTS 消费者 → 音频队列 ----
         # DESIGN §3.1：各段流水线并行，全链路延迟不是各段串行累加。
         # 首句一到位即开始合成，因此"首次出声"可以早于 LLM 输出完整回答。
-        messages = [{"role": "system", "content": _BRAIN_SYSTEM_PROMPT}] + ctx.history[-12:]
+        messages = [{"role": "system", "content": _SYSTEM_PROMPT}] + ctx.history[-12:]
 
         token_q: asyncio.Queue = asyncio.Queue()
         sentence_q: asyncio.Queue = asyncio.Queue()
@@ -420,12 +421,26 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
                     sentence = await sentence_q.get()
                     if sentence is None:
                         break
+                    # TTS 前清理（brain/text_clean.py）：prompt 已禁止 Markdown/emoji，
+                    # 这里是兜底——模型不听话时也不能让 TTS 念出星号、emoji、"（停顿）"。
+                    # ⚠️ 只清洗喂给 TTS 的这份；brain_token / done.answer 仍是原文（前端要渲染气泡）。
+                    spoken = clean_for_tts(sentence)
+                    if not spoken:
+                        # 整句都是格式噪音（例如单独一行的 "---"）：跳过，不占用 TTS 与口型
+                        if _TTS_DEBUG:
+                            print(f"[tts] 整句为格式噪音，已丢弃: {sentence!r}", flush=True)
+                        continue
+                    if _TTS_DEBUG:
+                        # 打印**实际送进 TTS 的文本**（无论是否被清理过）——"喂给 TTS 的到底
+                        # 干不干净"必须有可核对的证据，不能只靠读代码下结论。
+                        diff = f"  (原文: {sentence!r})" if spoken != sentence else ""
+                        print(f"[tts] 送合成: {spoken!r}{diff}", flush=True)
                     if tts_info["start_ms"] is None:
-                        # 流水线重叠的真凭据：首句交给 TTS 的时刻（此刻 LLM 可能还在生成）
+                        # 流水线重叠的真凭据：首句**真正交给 TTS** 的时刻（此刻 LLM 可能还在生成）
                         tts_info["start_ms"] = int((time.perf_counter() - t0) * 1000)
                     buf_start_ms = offset_ms  # 待发分片在音频时钟上的起点（口型片段排期用）
                     pcm_buf = bytearray()
-                    async for chunk in _tts.stream(sentence, start_offset_ms=offset_ms):
+                    async for chunk in _tts.stream(spoken, start_offset_ms=offset_ms):
                         if chunk.audio:
                             if tts_info["first_ms"] is None:
                                 tts_info["first_ms"] = int((time.perf_counter() - t0) * 1000)

@@ -463,9 +463,21 @@ export default function ConsolePage() {
   // 为什么必须单独开一路：对话采集在静音端点后即释放音轨，不重新监听就永远采集不到插话，
   // 自动打断会退化成"只有手动按钮"（见 PROGRESS-2026-09-15 的阻塞节）。
   // 监听期间必须不上行音频，否则数字人自己的声音会被当成用户说话送进 ASR。
+  const wantBargeRef = useRef(false)
   useEffect(() => {
-    if (state === 'speaking' && !recording) void startMic('barge')
-    else if (monitoring) void stopMonitor()
+    const wantBarge = state === 'speaking' && !recording
+    wantBargeRef.current = wantBarge
+    if (wantBarge) {
+      // start 是异步的（getUserMedia + worklet）：**完成后必须再核对一次期望值**。
+      // 否则播报很快结束时会「start 还没落地、清理已经跑过」——monitoring 那时还是 false，
+      // 下面的分支不会调 stopMonitor，于是这次监听再没人释放 → modeRef 永远非 null
+      // → 之后麦克风再也开不起来（实测现象："只能用一次"）。
+      void startMic('barge').then(() => {
+        if (!wantBargeRef.current) void stopMonitor()
+      })
+    } else {
+      void stopMonitor() // 内部自带守卫（非 barge 直接返回），无条件调用是安全的
+    }
   }, [state, recording, monitoring, startMic, stopMonitor])
 
   return (

@@ -81,6 +81,10 @@ export function useMicCapture(sessionId: string | null, cbRef: React.MutableRefO
   const nodeRef = useRef<AudioWorkletNode | null>(null)
   const pendingRef = useRef<Float32Array>(new Float32Array(0))
   const seqRef = useRef(0)
+  /** 采集代际：每次 release 递增，使**在途的 start()** 作废（见 start 里的核对）。
+   *  没有它会出幽灵采集：getUserMedia/worklet 是异步的，等它返回时可能早已不该采集，
+   *  却仍把 modeRef 设成非 null → 后续 start 全被守卫挡掉（"识别只能用一次"）。 */
+  const epochRef = useRef(0)
   const silentMsRef = useRef(0)
   const fullTextRef = useRef('')
   const stoppingRef = useRef(false)
@@ -116,6 +120,7 @@ export function useMicCapture(sessionId: string | null, cbRef: React.MutableRefO
 
   /** 释放采集资源（两种模式共用）。 */
   const release = useCallback(async () => {
+    epochRef.current += 1 // 使所有在途 start() 作废（见 epochRef 注释）
     try {
       nodeRef.current?.disconnect()
       streamRef.current?.getTracks().forEach((t) => t.stop())
@@ -157,7 +162,15 @@ export function useMicCapture(sessionId: string | null, cbRef: React.MutableRefO
 
   const start = useCallback(
     async (mode: MicMode = 'dialog') => {
-      if (!sessionId || modeRef.current !== null) return // 已有采集在跑（两种模式互斥）
+      if (!sessionId) return
+      // 已有采集在跑时：同模式直接返回；**不同模式抢占**（barge 监听让位给 dialog，反之亦然）。
+      // ⚠️ 不能静默 return：barge 监听一旦因竞态没被释放，之后每次 start 都撞在这道守卫上
+      //    → 麦克风永久失灵（实测现象："ASR 识别只能用一次"）。
+      if (modeRef.current !== null) {
+        if (modeRef.current === mode) return
+        await release()
+      }
+      const myEpoch = ++epochRef.current
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
@@ -222,6 +235,14 @@ export function useMicCapture(sessionId: string | null, cbRef: React.MutableRefO
 
           // 静音端点 → 自动收尾
           if (silentMsRef.current >= SILENCE_MS) void stop(true)
+        }
+
+        // 期间若已被释放/抢占（release 会递增 epoch），这次 start 作废：
+        // 关掉刚拿到的资源后返回，绝不留下"幽灵采集"占住 modeRef。
+        if (epochRef.current !== myEpoch) {
+          stream.getTracks().forEach((t) => t.stop())
+          if (ctx.state !== 'closed') void ctx.close()
+          return
         }
 
         source.connect(node)

@@ -258,6 +258,22 @@ export default function ConsolePage() {
     savePersisted({ sessionId: session.session_id, messages: keep })
   }, [session, messages])
 
+  /** 把"已产出但尚未落地"的部分回复落成正式消息。
+   *
+   * 为什么必须有：回复文本是逐 token 显示在临时的 `streamText` 里，**只有 `done` 事件才会把它
+   * 落进 messages**。一旦 `done` 到不了——被**打断**（`handleInterrupt` 关流）、或 SSE 传输中断
+   * （`client.ts` 的 onerror 也会关流）——`streamText` 会在下一轮 `sendTurn` 的 `setStreamText('')`
+   * 里被清掉，而它从未进过 messages → 用户看到"上一轮的回复凭空消失"（实测现象）。
+   * 宁可留下带标记的半句，也不能让它消失。
+   */
+  const flushPartial = useCallback((reason: string) => {
+    const partial = bufRef.current.trim()
+    setStreamText(null)
+    if (partial) {
+      setMessages((m) => [...m, { role: 'digital', text: `${partial}（${reason}）`, at: Date.now() }])
+    }
+  }, [])
+
   /** 一轮对话：文本 → SSE（真实 ASR端点 → DeepSeek 流式） */
   const sendTurn = useCallback(
     (text: string) => {
@@ -392,12 +408,15 @@ export default function ConsolePage() {
               ])
             }
           },
-          onError: (e) => setError(e.message),
+          onError: (e) => {
+            setError(e.message)
+            flushPartial('连接中断') // 同样：done 不会来了，已产出的不能丢
+          },
         },
         text,
       )
     },
-    [session, stopPlayback, resetLip],
+    [session, stopPlayback, resetLip, flushPartial],
   )
 
   /** 打断：本地立刻停播/停口型/关流，再通知后端（DESIGN-打断 §3.3 规则3）。 */
@@ -408,6 +427,7 @@ export default function ConsolePage() {
     resetLip() // ② 口型片段也停
     closeRef.current?.() // ③ 关流：不再接收新分片（后端也会因 stop_requested 停止产出）
     closeRef.current = null
+    flushPartial('已被打断') // ④ 已产出的半句必须落地：done 不会再来了
     await api.interrupt(session.session_id).catch((e: Error) => setError(e.message))
     setState('interrupted')
     window.setTimeout(() => {

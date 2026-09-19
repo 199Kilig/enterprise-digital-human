@@ -356,6 +356,36 @@ python backend/eval/verify_e2e_lip.py "运费怎么算"
 > 这是**外放 + AEC 不足**的**第二种**表现（第一种是本节 ① 的自打断）。两者指向同一结论：
 > **AEC 是这套打断设计成立的前提**。外放场景必须解决（戴耳机 / 回声门控 / ADR-004 的 P2 VAD 迁后端）。
 
+### 3.18 本机后端重启的姿势 + TTS 诊断开关（2026-09-19）
+
+**坑：`taskkill` 在 git-bash 里参数被原样透传，导致"以为重启了其实没有"。**
+
+```bash
+# ❌ 错误写法：//F 不会转义成 /F，taskkill 报「无效参数/选项 - '//F'」→ 旧进程照旧活着
+taskkill //F //PID <pid>
+
+# ✅ 正确写法
+netstat -ano | grep ":8010" | grep LISTENING      # 先取 PID（最后一列）
+MSYS_NO_PATHCONV=1 taskkill /F /PID <pid>
+```
+
+**为什么危险**：旧进程不死时，新后端起不来——uvicorn 会先打印 `Application startup complete`
+再报 `[Errno 10048] bind ... 只允许使用一次` 然后退出。只扫一眼日志开头会**误判成重启成功**。
+
+**校验"真的换了进程"**：`curl /api/v1/health` **不足以判断**（旧进程同样返回 `api:up`）。
+必须看 PID 变了，或看日志文件首行时间戳是新的。
+
+**载入 backend/.env**：文件是 CRLF 时直接 `source` 会把 `
+` 带进变量值（key 末尾多一个回车 →
+401）。写法：`set -a; . <(sed 's/\r$//' ./.env); set +a`。
+
+**重启的副作用**：会话是内存态（`routes.py` 的 `_sessions`），重启即断掉正在进行的多轮上下文；
+前端会走"探测 404 → 保留本地历史 + 提示上下文已重置"的恢复路径（PROGRESS-2026-09-17 §一）。
+
+**TTS 诊断开关**：`TTS_DEBUG=1` 启动后端后，每句**实际送进 TTS 的文本**会打印成
+`[tts] 送合成: '...'`（若发生过清理，同行附 `(原文: ...)`）。
+用来核对"喂给 TTS 的是不是干净文本"（ADR-008），默认关闭。
+
 ## 4. 模型与下载源
 
 - 模型权重国内优先 **ModelScope**（DESIGN §5.4 坑 2）：FunASR（paraformer-zh-streaming + fsmn-vad）、CosyVoice2、MuseTalk 权重
@@ -378,4 +408,5 @@ python backend/eval/verify_e2e_lip.py "运费怎么算"
 | 2026-09-17 | **修"第二轮重复上一轮内容"（§3.17 ④）**：按「说话」只开麦没让数字人闭嘴 → 麦克风收进扬声器回放 → ASR 把旧内容当本轮输入；改为开麦前先 `stopPlayback()`（无条件）+ 播报态下 `handleInterrupt()` |
 | 2026-09-17 | **修"上一轮回复凭空消失"（§3.17 ③）**：回复只在 `done` 时落地，打断/断流路径不落地已被产出文本 → 新增 `flushPartial` 在打断与连接中断时把半句落成消息 |
 | 2026-09-17 | **修两个真机才暴露的缺陷（§3.17）**：① `useMicCapture` 异步 start 撞只读守卫 → "识别只能用一次"（epoch + 抢占 + 完成后核对）；② ASR 冷启动 22s → "初次说话无反应"（lifespan 后台预热，实测首片 227ms） |
+| 2026-09-19 | **教育场景门面 + 语音文本治理**：前端教育皮肤与「学习目标」门面（默认路由；学习域数据前端单点占位并标注「演示数据」）；后端人格外置 `brain/persona.py`（`teacher` 默认 / `cs` 可切）+ TTS 前文本清理 `brain/text_clean.py`（ADR-007/008）；SPEC v1.10、DESIGN §4.4 同步；后端重启坑与 `TTS_DEBUG` 见 §3.18 |
 | 2026-09-17 | **配置中心收口（§3.16）**：`asr` 段 6 字段代码从不读取且 `chunk_size` 值与实现不符 → `model`/`chunk_size` 接回代码、删除 4 个名义项；顺带修正 DESIGN 目录图（`vad/` 已删） |

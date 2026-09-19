@@ -285,6 +285,44 @@ python backend/eval/verify_e2e_lip.py "运费怎么算"
 3. `chunk_size` 改动会改分片粒度，而**前端 `useMicCapture` 按同一粒度（9600 样本）硬编码切片**——
    两边必须一致（SPEC §5.4），改后需重跑 V-03 标定。
 
+### 3.17 前端麦克风采集的两个致命缺陷（2026-09-17 修，别再踩）
+
+**① "ASR 识别只能用一次" —— 异步 start 撞上只读守卫（`useMicCapture`）**
+
+症状：第一次语音识别正常，之后点麦克风**毫无反应**（连错误都不报）。
+
+根因链：
+
+1. `startMic('barge')`（播报期间开打断监听）是**异步**的（`getUserMedia` + `addModule` 都要等）
+2. 播报很快结束时 effect 重跑，此刻 `monitoring` 还是 `false`（`setMonitoring(true)` 尚未执行到）
+   → `else if (monitoring)` 不成立 → **没人释放这次监听**
+3. 随后异步 start 落地，`modeRef.current = 'barge'`
+4. 而 `start()` 开头是 `if (!sessionId || modeRef.current !== null) return` → **静默返回**
+   → 此后每次点麦克风都被这道守卫挡掉，**永久失灵**
+
+修法三件套：
+- `release()` 递增 `epochRef`；`start()` 完成后核对 epoch，不一致就关掉刚拿到的资源（消灭"幽灵采集"）
+- `start()` 遇到**不同**模式改为**抢占**（`await release()` 后继续），不再静默 return
+- ConsolePage 的 effect 里 `startMic('barge').then(...)` 完成后**再核对一次期望值**，不需要则释放
+
+> **教训**：只读守卫（`modeRef !== null`）+ 异步获取资源 = 必然出现"幽灵状态"。
+> 凡是"先检查、再异步"的地方，都要用代际/版本号让在途操作可作废。
+> 这类缺陷**离线脚本测不出来**（后端连跑 3 轮全部正常），只有真机点几下才暴露。
+
+**② "初次说话毫无反应" —— ASR 模型冷启动 22s（`routes.py` lifespan）**
+
+症状：刚用 `start.bat` 启动后第一次说话长时间没反应，试几次后才正常。
+
+根因：`get_model()` 冷启动阻塞 22s，而前端每 600ms 一片且 `await postChunk` 发送
+→ 冷启动期间所有分片都堵在模型加载上；而 `ASR_TIMEOUT` 只统计 `_generate` 内部（**不含加载**），
+所以**连超时都不报**，就是纯粹地卡住。
+
+修法：`routes.py` 加 `lifespan`，启动即**后台线程**预热（不阻塞 uvicorn 启动；预热失败不影响服务）。
+
+实测：预热 **23.5s** 完成；**预热后首片 227ms**（未预热时 ~22000ms）。
+
+> 这条是**坑 8 的根治**：以前靠人手工跑 `prewarm_asr.py`，现在服务自己预热，用户无感。
+
 ## 4. 模型与下载源
 
 - 模型权重国内优先 **ModelScope**（DESIGN §5.4 坑 2）：FunASR（paraformer-zh-streaming + fsmn-vad）、CosyVoice2、MuseTalk 权重
@@ -304,4 +342,5 @@ python backend/eval/verify_e2e_lip.py "运费怎么算"
 | 2026-09-14 | **接入语音输入（ASR）**：`asr/streaming.py` + `POST /api/v1/asr/chunk` + 前端 AudioWorklet 采集与前端 VAD（ADR-004）；真实测试集 7 条识别全对；打断（FR-06）随之可用（踩坑 8~11） |
 | 2026-09-14 | **口型服务化落地（云 GPU）**：`deploy/lip_service.py`（常驻模型+avatar、去逐帧落盘、JPEG 直出）+ 本机 `lip/musetalk_engine.py` 客户端 + SSE `lip_frame` 事件流 + SSH 隧道；端到端 184 帧验证通过。**关键实测：GPU 生成 92fps（V-01 的 19.07 是 I/O 瓶颈）、隧道仅 0.96MB/s、H.264 比逐帧 JPEG 小 41×**（踩坑 14~19，报告 eval/reports/lip_service_check.md） |
 | 2026-09-17 | **会话持久化 + 契约/并发硬化**：新增 `GET /api/v1/session/{id}` 存活探测；前端 localStorage 恢复会话与历史（后端重启则保留历史并提示上下文已重置）；口型队列背压（`lip.queue_max`）+ `done.lip_dropped`（SPEC v1.8）；`POST /asr/chunk` 补 HTTP 契约 + `seq` 语义（SPEC v1.9） |
+| 2026-09-17 | **修两个真机才暴露的缺陷（§3.17）**：① `useMicCapture` 异步 start 撞只读守卫 → "识别只能用一次"（epoch + 抢占 + 完成后核对）；② ASR 冷启动 22s → "初次说话无反应"（lifespan 后台预热，实测首片 227ms） |
 | 2026-09-17 | **配置中心收口（§3.16）**：`asr` 段 6 字段代码从不读取且 `chunk_size` 值与实现不符 → `model`/`chunk_size` 接回代码、删除 4 个名义项；顺带修正 DESIGN 目录图（`vad/` 已删） |

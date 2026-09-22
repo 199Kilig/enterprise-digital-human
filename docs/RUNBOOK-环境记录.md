@@ -160,6 +160,14 @@ cd backend/eval && ../.venv/Scripts/python.exe verify_e2e_latency.py --runs 6 --
     `UnicodeEncodeError: 'gbk' codec can't encode character '\u26a0'`，**服务/脚本当场退出**。
     双保险：① 脚本顶部 `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`；
     ② .bat 里先 `chcp 65001 >nul` 再调 Python。已在 `fake_lip_server.py` / `verify_e2e_lip.py` / `verify_lip_sync.py` 落地。
+24. **`.bat` 里不要用中文/非 ASCII 字符串做 `findstr` 匹配（2026-09-22 踩，dry-run 复现）**：
+    `findstr` 按 **OEM 代码页**解释命令行参数，而 `powershell`/`netstat` 经管道进来的字节是另一种编码，
+    两边不一致 → **中文 marker 永远不命中**。现场：`stop.bat` 用 `%ROOT%frontend`（含中文的仓库路径）
+    校验进程归属，结果把**自己刚起的 vite** 判成"不是本项目"而拒绝清理 —— 静默失败，最坏的一种。
+    规则：`.bat` 里的匹配判据一律用 **ASCII 子串**（如 `node_modules\.bin`、`api.routes:app`），
+    并把比对放进 PowerShell 内部（`-like`）而不是 `findstr`，让比较全程留在 Unicode。
+    同一类坑还有**块内未转义括号**：`if ... ( echo a (b) c )` 里的 `)` 会提前结束块，
+    cmd 报「此时不应有 X」，脚本当场终止（`start.bat` 曾因此崩在打开浏览器之前）。
 
 ### 3.10 口型推理服务（2026-09-14 落地）
 

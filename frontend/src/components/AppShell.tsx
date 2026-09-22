@@ -1,5 +1,5 @@
 import { Outlet } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { useTheme } from '../hooks/useTheme'
 import EduSidebar from './EduSidebar'
@@ -41,7 +41,10 @@ export default function AppShell() {
       <EduSidebar health={health} healthError={healthError} theme={theme} setTheme={setTheme} />
       <main className="edu-main">
         <div className="edu-main-inner">
-          <Outlet />
+          {/* 页面按需加载：只让内容区出占位，侧栏与页头不参与重渲染 */}
+          <Suspense fallback={<div className="edu-route-loading">加载中…</div>}>
+            <Outlet />
+          </Suspense>
         </div>
       </main>
     </div>

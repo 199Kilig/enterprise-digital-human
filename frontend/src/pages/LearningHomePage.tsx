@@ -1,8 +1,11 @@
-import { useState } from 'react'
+import { Suspense, lazy, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import FractionBadge from '../components/edu/FractionBadge'
-import RingProgress from '../components/edu/RingProgress'
-import StageGoalChart from '../components/edu/StageGoalChart'
+/** 图表按需加载：recharts（含 d3 依赖）是本项目最大的单个依赖，首屏不必等它。
+ *  fallback 用与真实容器同高的骨架（.edu-ring 176px / .edu-stage-chart 196px），
+ *  图表到位时不产生位移跳动。 */
+const RingProgress = lazy(() => import('../components/edu/RingProgress'))
+const StageGoalChart = lazy(() => import('../components/edu/StageGoalChart'))
 import { FocusTimer, PomodoroTimer } from '../components/edu/Timers'
 import {
   IconFlag,
@@ -109,11 +112,13 @@ export default function LearningHomePage() {
             <h2>本周进度</h2>
             <span className="edu-card-src">演示数据</span>
           </div>
-          <RingProgress
-            done={weeklyProgress.done}
-            total={weeklyProgress.total}
-            label="项已完成"
-          />
+          <Suspense fallback={<div className="edu-ring edu-chart-skeleton" />}>
+            <RingProgress
+              done={weeklyProgress.done}
+              total={weeklyProgress.total}
+              label="项已完成"
+            />
+          </Suspense>
         </section>
 
         {/* ---- 今日学习任务（跨两行） ---- */}
@@ -192,7 +197,9 @@ export default function LearningHomePage() {
               目标：<b>{stageGoal.target}</b>
             </span>
           </div>
-          <StageGoalChart points={stageGoal.points} target={stageGoal.target} />
+          <Suspense fallback={<div className="edu-stage-chart edu-chart-skeleton" />}>
+            <StageGoalChart points={stageGoal.points} target={stageGoal.target} />
+          </Suspense>
         </section>
 
         {/* ---- 智能建议（跨全宽） ---- */}

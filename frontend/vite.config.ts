@@ -16,4 +16,15 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // 框架依赖单独成块：版本不常变，浏览器可长期缓存。页面与图表 chunk 由动态
+        // import 自动分包（见 App.tsx 的路由 lazy 与 LearningHomePage 的图表 lazy）。
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+        },
+      },
+    },
+  },
 })

@@ -577,6 +577,29 @@
   height: 176px;
 }
 
+/* 按需加载占位：路由级（内容区）与图表级（与真实容器同高，避免到位后跳动）。 */
+.edu-route-loading {
+  padding: var(--sp-6, 32px);
+  color: var(--text-tertiary);
+  font-size: var(--fs-sm);
+}
+
+.edu-chart-skeleton {
+  border-radius: var(--r-md);
+  background: linear-gradient(90deg, var(--bg-inset) 0%, var(--bg-hover) 50%, var(--bg-inset) 100%);
+  background-size: 200% 100%;
+  animation: edu-skeleton 1.4s ease-in-out infinite;
+}
+
+@keyframes edu-skeleton {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
 .edu-ring-center {
   position: absolute;
   inset: 0;

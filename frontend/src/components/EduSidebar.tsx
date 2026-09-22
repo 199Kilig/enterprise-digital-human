@@ -12,6 +12,7 @@ import {
   IconLedger,
   IconMistake,
   IconRefresh,
+  IconTarget,
   IconTool,
   IconTrend,
   IconVideo,
@@ -97,7 +98,8 @@ export default function EduSidebar({
 
   return (
     <aside id="edu-side" className={`edu-side${open ? ' open' : ''}`}>
-      <div className="edu-assistant">
+      {/* 点标识回首页：此前侧栏没有任何指向 / 的入口，从首页点出去就回不来（只能靠浏览器后退） */}
+      <Link to="/" className="edu-assistant" onClick={onClose} title="回到学习目标首页">
         <img className="edu-avatar" src="/media/avatar_face.png" alt="AI 学习助手形象" />
         <div>
           <div className="edu-assistant-name">
@@ -105,7 +107,7 @@ export default function EduSidebar({
           </div>
           <div className="edu-assistant-sub">你的专属 AI 学习助手</div>
         </div>
-      </div>
+      </Link>
 
       {/* 连接状态绑定真实 /api/v1/health 探测（10s 轮询，见 AppShell） */}
       <span
@@ -121,6 +123,24 @@ export default function EduSidebar({
         <span className="edu-conn-dot" />
         {online ? '已连接 · 数字人链路在线' : health ? '探测中' : '尚未连接'}
       </span>
+
+      {/* 显式的主导航入口。end 必须有：否则 to="/" 在 /console 等路径上也会算 active */}
+      <nav className="edu-side-nav">
+        <NavLink
+          to="/"
+          end
+          onClick={onClose}
+          className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}
+        >
+          <IconTarget size={15} />
+          <span>
+            <div>学习目标</div>
+            <div className="muted" style={{ fontSize: 'var(--fs-micro)' }}>
+              首页 · 学习仪表盘
+            </div>
+          </span>
+        </NavLink>
+      </nav>
 
       <section className="edu-side-block">
         <div className="edu-side-head">

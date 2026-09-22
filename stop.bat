@@ -13,12 +13,16 @@ echo   stopping dev services
 echo ============================================================
 echo.
 
-for %%P in (8010 5173 5174) do call :killport %%P
+REM 4173 is vite preview (used to check the built bundle); 5174 would only appear
+REM if strictPort were ever relaxed. Killing them keeps later "which UI am I looking
+REM at" confusion off the table.
+for %%P in (8010 5173 4173 5174) do call :killport %%P
 
 echo.
 echo ports still listening:
 netstat -ano | findstr /C:":8010 " | findstr /C:"LISTENING"
 netstat -ano | findstr /C:":5173 " | findstr /C:"LISTENING"
+netstat -ano | findstr /C:":4173 " | findstr /C:"LISTENING"
 netstat -ano | findstr /C:":5174 " | findstr /C:"LISTENING"
 echo done.
 echo.

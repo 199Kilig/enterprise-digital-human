@@ -100,7 +100,11 @@ export interface DuplexSession {
   /** 会话建立中（首屏空态用） */
   connecting: boolean
   sendTurn: (text: string) => void
-  interrupt: () => Promise<void>
+  /** 打断当前播报。reason 会写进气泡后缀，用来分辨「自动插话」还是「手动停止」 */
+  interrupt: (reason?: string) => Promise<void>
+  /** 说话期间是否监听环境音以支持自动插话打断（外放建议关闭，见 RUNBOOK §3.17） */
+  bargeEnabled: boolean
+  setBargeEnabled: (v: boolean) => void
   resetSession: (opts?: { fresh?: boolean }) => Promise<void>
   startMic: () => Promise<void>
   stopMic: () => void
@@ -109,8 +113,28 @@ export interface DuplexSession {
   toggleMic: () => void
 }
 
+/** 插话自动打断的用户偏好（localStorage 持久化） */
+const BARGE_PREF_KEY = 'dh.barge.enabled.v1'
+
 export function useDuplexSession(): DuplexSession {
   const [session, setSession] = useState<SessionInfo | null>(null)
+  // 说话期间是否监听环境音做「插话自动打断」。默认开——插话能力不丢。
+  // 为什么需要开关：外放时数字人自己的声音会被麦克风收进去（AEC 在扬声器近场消不干净），
+  // 音量远超判据 → 它被自己的声音打断（实测：用户外放时"无缘无故"停一半，见 RUNBOOK §3.17）。
+  const [bargeEnabled, setBargeEnabled] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(BARGE_PREF_KEY) !== '0'
+    } catch {
+      return true // 无 localStorage（隐私模式）按默认开
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem(BARGE_PREF_KEY, bargeEnabled ? '1' : '0')
+    } catch {
+      /* 隐私模式忽略 */
+    }
+  }, [bargeEnabled])
   const [state, setState] = useState<SessionState>('idle')
   const [events, setEvents] = useState<StreamEvent[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -432,14 +456,14 @@ export function useDuplexSession(): DuplexSession {
   )
 
   /** 打断：本地立刻停播/停口型/关流，再通知后端（DESIGN-打断 §3.3 规则3）。 */
-  const interrupt = useCallback(async () => {
+  const interrupt = useCallback(async (reason = '已被打断') => {
     if (!session) return
     mutedRef.current = true // ① 静默期：丢弃在途分片（防止停播后又重建播放器出声）
     stopPlayback() // ② 数字人立刻闭嘴，不等后端往返
     resetLip()
     closeRef.current?.() // ③ 关流：不再接收新分片
     closeRef.current = null
-    flushPartial('已被打断') // ④ 已产出的半句必须落地：done 不会再来了
+    flushPartial(reason) // ④ 已产出的半句必须落地：done 不会再来了（后缀标明是谁打断的）
     await api.interrupt(session.session_id).catch((e: Error) => setError(e.message))
     setState('interrupted')
     window.setTimeout(() => {
@@ -461,7 +485,7 @@ export function useDuplexSession(): DuplexSession {
         const now = Date.now()
         if (state !== 'speaking' || now - bargeAtRef.current < 2000) return
         bargeAtRef.current = now
-        void interrupt()
+        void interrupt('检测到插话，停下了')
       },
       onError: (m) => setError(m),
     }
@@ -472,7 +496,9 @@ export function useDuplexSession(): DuplexSession {
   // 自动打断会退化成"只有手动按钮"。监听期间必须不上行音频，否则数字人自己的声音会被当成用户说话。
   const wantBargeRef = useRef(false)
   useEffect(() => {
-    const wantBarge = state === 'speaking' && !recording
+    // bargeEnabled=false 时：播报期间**不开**监听（外放自打断的解法）。
+    // 关掉的是"自动"打断；手动按钮（让她停下）与开麦打断完全不受影响。
+    const wantBarge = bargeEnabled && state === 'speaking' && !recording
     wantBargeRef.current = wantBarge
     if (wantBarge) {
       // start 是异步的（getUserMedia + worklet）：**完成后必须再核对一次期望值**。
@@ -484,7 +510,7 @@ export function useDuplexSession(): DuplexSession {
     } else {
       void stopMonitor() // 内部自带守卫（非 barge 直接返回），无条件调用是安全的
     }
-  }, [state, recording, monitoring, startMicRaw, stopMonitor])
+  }, [bargeEnabled, state, recording, monitoring, startMicRaw, stopMonitor])
 
   /** 开麦（learner 视角只有一个按钮：开麦/结束） */
   const startMic = useCallback(async () => {
@@ -494,7 +520,7 @@ export function useDuplexSession(): DuplexSession {
     //    ASR 就把旧内容识别成本轮输入，LLM 照着再答一遍（"第二轮重复上一轮内容"）。
     stopPlayback()
     // ② 仍在播报态时按语义通知后端打断（DESIGN-打断 §3.3 规则3）
-    if (state === 'speaking') void interrupt()
+    if (state === 'speaking') void interrupt('你开始提问')
     // ③ 再开麦克风
     await startMicRaw()
   }, [state, interrupt, startMicRaw, stopPlayback])
@@ -528,6 +554,8 @@ export function useDuplexSession(): DuplexSession {
     connecting,
     sendTurn,
     interrupt,
+    bargeEnabled,
+    setBargeEnabled,
     resetSession,
     startMic,
     stopMic,

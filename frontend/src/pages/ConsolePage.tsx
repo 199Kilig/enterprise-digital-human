@@ -81,6 +81,17 @@ export default function ConsolePage() {
             <span className="edu-chat-dot" />
             {STATE_TEXT[s.state]}
           </span>
+          <label
+            className="edu-chat-barge"
+            title="开启时：你说话它就停下（插话打断）。外放时它自己的声音会被麦克风收进去、误把自己打断，这种情况请关掉；戴耳机可保持开启。"
+          >
+            <input
+              type="checkbox"
+              checked={s.bargeEnabled}
+              onChange={(e) => s.setBargeEnabled(e.target.checked)}
+            />
+            允许插话打断
+          </label>
           <button className="edu-ghost" onClick={() => void s.resetSession({ fresh: true })}>
             重新开始
           </button>
@@ -165,7 +176,11 @@ export default function ConsolePage() {
             </button>
 
             {speaking && (
-              <button className="edu-chat-stop" onClick={() => void s.interrupt()} title="让数字人停下">
+              <button
+                className="edu-chat-stop"
+                onClick={() => void s.interrupt('你让她停下了')}
+                title="让数字人停下"
+              >
                 让她停下
               </button>
             )}

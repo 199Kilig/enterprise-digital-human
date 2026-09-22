@@ -413,6 +413,32 @@
   color: var(--accent);
 }
 
+/* 插话自动打断开关。为什么要把开关放到学习者眼前：外放时数字人自己的声音会被麦克风
+   收进去，判据（底噪×8 或 0.03，连续 2 帧）被自己触发 → 它被自己打断（实测现象：
+   回答说到一半"无缘无故"停）。开关只关"自动"打断，手动按钮与开麦打断不受影响。 */
+.edu-chat-barge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px var(--sp-2, 8px);
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.edu-chat-barge:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.edu-chat-barge input {
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .edu-demo-badge {
   display: inline-flex;
   align-items: center;

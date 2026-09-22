@@ -1513,3 +1513,254 @@
     background: var(--overlay-bg);
   }
 }
+
+/* ============================================================================
+   首页 · 运行总览（ADR-009）
+   只服务「真实接口数据」的呈现：状态徽章 / 指标清单 / 延迟预算条 / 诊断条目。
+   色值全部走语义 token（--ok / --warn / --fail），浅深主题自动适配。
+   ============================================================================ */
+
+/* 卡片内小注（通用版） */
+.edu-card-note {
+  margin-top: var(--sp-3);
+  color: var(--text-muted);
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+}
+
+/* 骨架卡：高度由网格决定，与真实卡一致，加载完不跳动 */
+.edu-card-skel {
+  min-height: 210px;
+  background: linear-gradient(100deg, var(--bg-inset) 30%, var(--bg-hover) 50%, var(--bg-inset) 70%);
+  background-size: 200% 100%;
+  animation: edu-skeleton 1.4s ease-in-out infinite;
+}
+
+/* ---- 运行状态（4 行：标签 + 大数值）---- */
+.edu-stat-list {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.edu-stat-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.edu-stat-list li > span {
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
+.edu-stat-list b {
+  color: var(--text-primary);
+  font-size: var(--fs-lg);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.edu-stat-list b.is-ok {
+  color: var(--ok);
+}
+
+.edu-stat-list b.is-bad {
+  color: var(--warn);
+}
+
+/* ---- 状态徽章（文字 + 描边着色，背景透明：白底/深底都可读）---- */
+.edu-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.edu-badge--ok {
+  color: var(--ok);
+  border-color: var(--ok-border);
+}
+
+.edu-badge--warn {
+  color: var(--warn);
+  border-color: var(--warn-border);
+}
+
+.edu-badge--fail {
+  color: var(--fail);
+  border-color: var(--fail-border);
+}
+
+.edu-badge--pending {
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+/* ---- 验收指标清单（可滚动）---- */
+.edu-metric-list {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0 2px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 430px;
+  overflow-y: auto;
+}
+
+.edu-metric-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
+  border-radius: var(--r-md);
+}
+
+.edu-metric-row:hover {
+  background: var(--bg-hover);
+}
+
+.edu-metric-dim {
+  flex: 0 0 52px;
+  color: var(--text-muted);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+}
+
+.edu-metric-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.edu-metric-name {
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edu-metric-val {
+  color: var(--text-secondary);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 未达标：徽章 + 名称 + 读数 ---- */
+.edu-problem-list {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.edu-problem-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.edu-problem-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- 延迟预算（实测 / 目标 条）---- */
+.edu-budget-list {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.edu-budget-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.edu-budget-num {
+  color: var(--text-primary);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.edu-budget-bar {
+  margin-top: 6px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+
+.edu-budget-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand-500);
+  transition: width var(--transition-base);
+}
+
+.edu-budget-fill.is-empty {
+  background: var(--border);
+}
+
+/* ---- 链路诊断条目（左侧色条 + 文本）---- */
+.edu-finding-list {
+  list-style: none;
+  margin: var(--sp-3) 0 var(--sp-3);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.edu-finding {
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--border);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+.edu-finding--ok {
+  border-left-color: var(--ok);
+}
+
+.edu-finding--warn {
+  border-left-color: var(--warn);
+  color: var(--text-primary);
+}
+
+.edu-finding--info {
+  border-left-color: var(--brand-500);
+}
+
+.edu-empty {
+  margin: 0;
+  padding: var(--sp-3) 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}

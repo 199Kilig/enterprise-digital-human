@@ -10,6 +10,46 @@
       主区「学习目标」标题 + 三列卡片网格（今日任务跨两行、智能建议跨全宽）。
    ========================================================================== */
 
+/* ---------------- 交互状态层（全站统一） ----------------
+   依据：① Material 3 交互状态层常量 —— hover 0.08 / pressed 0.10 覆盖层不透明度；
+        ② WCAG 2.4.7（Level AA）—— 每个可聚焦元素必须有可见焦点指示（Focus Visible）。
+   为什么单独成节：此前全站只有 3 处零散 transition（0.08s / 0.3s 混杂）、0 处 :focus-visible、
+   0 处 :active —— "Tab 看不到焦点、按下去没反应"，是演示稿和产品的直观差距。 */
+
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: var(--focus-ring-w) solid var(--accent);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* 主要交互元素统一过渡与按下反馈（pressed 态：轻微下沉，避免"点了没反应"） */
+:where(
+    .edu-ghost, .edu-cta, .edu-start-btn, .edu-pro-btn, .edu-icon-btn, .edu-tool, .edu-task,
+    .edu-chat-mic-btn, .edu-chat-send, .edu-chat-stop, .edu-side-toggle, .edu-hist-item,
+    .navitem, .theme-toggle button
+  ) {
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+:where(button, a, [role='button']):active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* 尊重系统"减少动态效果"偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* ---------------- 应用骨架 ---------------- */
 .edu-shell {
   display: grid;
@@ -452,11 +492,16 @@
 }
 
 /* ---------------- 卡片网格 ---------------- */
+/* 学习目标仪表盘网格。
+   实测缺陷（本轮）：原为不等比列宽（1 / 1.05 / 0.95）+ align-items: start，导致同一行卡片
+   底部参差（1600px 下同行高度 210 / 246 / 357，下方留白 52px 与 16px 不对称），
+   观感像"随手摆的格子"。改为等宽 + stretch（同行等高），卡内用 margin-top: auto 把底部
+   说明/CTA 推到底对齐。 */
 .edu-dash {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr) minmax(0, 0.95fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--sp-4);
-  align-items: start;
+  align-items: stretch;
 }
 
 .edu-card {
@@ -466,6 +511,17 @@
   background: var(--bg-surface);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-card);
+  /* 纵向 flex：等高之后由卡内元素决定留白位置，底部锚点见下一条 */
+  display: flex;
+  flex-direction: column;
+}
+
+/* 底部锚点：说明行/CTA 贴底，等高的卡片看起来是"填满的"而不是"上重下空" */
+.edu-card .edu-weekly-foot,
+.edu-card .edu-task-foot,
+.edu-card .edu-advice-basis,
+.edu-card--tasks .edu-start-btn {
+  margin-top: auto;
 }
 
 .edu-card--tasks {
@@ -1345,5 +1401,96 @@
   }
   .edu-chat-head-actions {
     margin-left: 0;
+  }
+}
+
+/* ---------------- 响应式：侧栏与仪表盘网格 ----------------
+   实测缺陷（本轮）：此前全项目只有 3 个媒体查询，且都在对话页 —— 骨架与学习首页没有断点。
+   后果：900px 视口下侧栏被拉成 885px 宽、整屏只剩它，主内容要滚过 1000px 才见到；
+   三列卡片在 1180px 下残留空轨道（今日任务卡掉行独占）。
+   口径：≥1181 三列；961–1180 两列（任务卡跨满宽）；≤960 侧栏收成抽屉、内容单列。 */
+
+.edu-side-toggle,
+.edu-side-backdrop {
+  display: none;
+}
+
+@media (max-width: 1180px) {
+  .edu-dash {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* 两列时任务卡不再跨两行，改跨满宽：否则它会顶掉一列的位置、留出空轨道 */
+  .edu-card--tasks {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 960px) {
+  .edu-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .edu-main {
+    padding: var(--sp-4) var(--sp-4) var(--sp-5);
+  }
+
+  .edu-dash {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .edu-hero {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--sp-3);
+  }
+
+  .edu-hero-actions {
+    flex-wrap: wrap;
+  }
+
+  /* 侧栏 → 抽屉：默认移出视口，打开时滑入；点遮罩 / 导航项 / Esc 关闭（见 AppShell） */
+  .edu-side-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin-bottom: var(--sp-3);
+    padding: 8px var(--sp-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+  }
+
+  .edu-side-toggle:hover {
+    border-color: var(--accent-border);
+    color: var(--accent);
+  }
+
+  .edu-side {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(300px, 86vw);
+    z-index: 40;
+    transform: translateX(-100%);
+    transition: transform var(--transition-base);
+    box-shadow: var(--shadow-pop);
+    border-right: 1px solid var(--border);
+  }
+
+  .edu-side.open {
+    transform: translateX(0);
+  }
+
+  .edu-side-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: var(--overlay-bg);
   }
 }

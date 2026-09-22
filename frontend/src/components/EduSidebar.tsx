@@ -73,11 +73,17 @@ export default function EduSidebar({
   healthError,
   theme,
   setTheme,
+  open,
+  onClose,
 }: {
   health: HealthResponse | null
   healthError: string | null
   theme: Theme
   setTheme: (t: Theme) => void
+  /** 窄屏抽屉是否展开（≥960px 侧栏常驻，该值无意义） */
+  open: boolean
+  /** 关闭抽屉：点遮罩 / 点导航项 / 按 Esc 都会调它 */
+  onClose: () => void
 }) {
   const [recent, setRecent] = useState<RecentItem[]>([])
   const reload = useCallback(() => setRecent(readRecent()), [])
@@ -90,7 +96,7 @@ export default function EduSidebar({
   const online = !healthError && health !== null
 
   return (
-    <aside className="edu-side">
+    <aside id="edu-side" className={`edu-side${open ? ' open' : ''}`}>
       <div className="edu-assistant">
         <img className="edu-avatar" src="/media/avatar_face.png" alt="AI 学习助手形象" />
         <div>
@@ -129,7 +135,7 @@ export default function EduSidebar({
           {recent.length > 0 ? (
             recent.map((r, i) => (
               <li key={`${r.at}-${i}`}>
-                <Link to="/console" title={`${shortTime(r.at)} · ${r.text}`}>
+                <Link to="/console" onClick={onClose} title={`${shortTime(r.at)} · ${r.text}`}>
                   {shortTime(r.at)} {r.text}
                 </Link>
               </li>
@@ -138,7 +144,7 @@ export default function EduSidebar({
             <li className="edu-empty">暂无本地对话记录，点「查看全部历史对话」开始提问</li>
           )}
         </ul>
-        <Link className="edu-cta" to="/console" style={{ marginTop: 'var(--sp-2)' }}>
+        <Link className="edu-cta" to="/console" onClick={onClose} style={{ marginTop: 'var(--sp-2)' }}>
           查看全部历史对话 <span>›</span>
         </Link>
       </section>
@@ -155,6 +161,7 @@ export default function EduSidebar({
               <Link
                 key={t.key}
                 to={`/tools/${t.key}`}
+                onClick={onClose}
                 className={`edu-tool${t.status === 'planned' ? ' planned' : ''}`}
                 title={t.desc}
               >
@@ -187,7 +194,12 @@ export default function EduSidebar({
         </div>
         <nav style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
           {ENG_VIEWS.map(({ to, label, hint, Icon }) => (
-            <NavLink key={to} to={to} className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}>
+            <NavLink
+              key={to}
+              to={to}
+              onClick={onClose}
+              className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}
+            >
               <Icon size={15} />
               <span>
                 <div>{label}</div>

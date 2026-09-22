@@ -184,6 +184,20 @@ export const IconLedger = (p: IconProps) => (
 )
 
 /** 占位页通用：工具/施工中 */
+/** 菜单：窄屏侧栏抽屉的开关 */
+export const IconMenu = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M4 6h16M4 12h16M4 18h16" />
+  </Base>
+)
+
+/** 关闭：抽屉/浮层 */
+export const IconClose = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M6 6l12 12M18 6L6 18" />
+  </Base>
+)
+
 export const IconTool = (p: IconProps) => (
   <Base {...p}>
     <path d="M14.5 5.5a3.5 3.5 0 0 0 4.8 4.8l-8 8-2.6-2.6 8-8Z" />

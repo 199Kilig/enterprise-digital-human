@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom'
 import { Suspense, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { useTheme } from '../hooks/useTheme'
+import { IconMenu } from './edu/Icons'
 import EduSidebar from './EduSidebar'
 import type { HealthResponse } from '../types'
 
@@ -16,6 +17,8 @@ export default function AppShell() {
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [healthError, setHealthError] = useState<string | null>(null)
   const [theme, setTheme] = useTheme()
+  // 窄屏侧栏抽屉（<960px 侧栏默认隐藏，见 edu.css 响应式一节）
+  const [sideOpen, setSideOpen] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -36,10 +39,38 @@ export default function AppShell() {
     }
   }, [])
 
+  // 抽屉打开时按 Esc 关闭（键盘用户不必去点遮罩）
+  useEffect(() => {
+    if (!sideOpen) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setSideOpen(false)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sideOpen])
+
   return (
     <div className="edu-shell">
-      <EduSidebar health={health} healthError={healthError} theme={theme} setTheme={setTheme} />
+      <EduSidebar
+        health={health}
+        healthError={healthError}
+        theme={theme}
+        setTheme={setTheme}
+        open={sideOpen}
+        onClose={() => setSideOpen(false)}
+      />
+      {sideOpen && (
+        <div className="edu-side-backdrop" role="presentation" onClick={() => setSideOpen(false)} />
+      )}
       <main className="edu-main">
+        <button
+          type="button"
+          className="edu-side-toggle"
+          onClick={() => setSideOpen(true)}
+          aria-expanded={sideOpen}
+          aria-controls="edu-side"
+        >
+          <IconMenu size={15} />
+          导航
+        </button>
         <div className="edu-main-inner">
           {/* 页面按需加载：只让内容区出占位，侧栏与页头不参与重渲染 */}
           <Suspense fallback={<div className="edu-route-loading">加载中…</div>}>

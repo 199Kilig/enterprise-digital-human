@@ -68,13 +68,15 @@ export default function AvatarStage({
     <div className="stage-layout">
       <div className="stage">
         {mediaOk ? (
+          // 同 ConsolePage：恒定 autoPlay + muted（静音才允许自动播放）。
+          // 无实时片段时循环播放离线产物作为"待机形象"；有实时片段时由它接力。
+          // 去掉 controls：自动播放后不再需要手动播放控件，控件还会遮挡舞台。
           <video
             key={src}
             src={src}
-            autoPlay={!!liveClip}
-            controls={!liveClip}
+            autoPlay
             loop={!liveClip}
-            muted={!!liveClip}
+            muted
             playsInline
             onError={() => setFailedSrc(src)}
           />

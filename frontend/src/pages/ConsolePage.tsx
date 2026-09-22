@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { IconPlay, IconSparkle } from '../components/edu/Icons'
-import { STAGE_CLIPS } from '../data/stageClips'
+import { IDLE_CLIP } from '../data/stageClips'
 import { useDuplexSession } from '../hooks/useDuplexSession'
 import type { ChatMessage, SessionState } from '../types'
 
@@ -63,7 +63,8 @@ export default function ConsolePage() {
     setDraft('')
   }
 
-  const stageSrc = s.lipClip?.url ?? STAGE_CLIPS[0].src
+  // 无实时口型片段时用 idle loop 待机；有片段时切成 blob 实时渲染（说话中）
+  const stageSrc = s.lipClip?.url ?? IDLE_CLIP
 
   return (
     <div className="edu-chat">
@@ -90,14 +91,11 @@ export default function ConsolePage() {
         {/* ---- 数字人形象（真实产物：MuseTalk 口型视频；无实时片段时回落到 V-01 产物） ---- */}
         <section className="edu-chat-stage">
           <div className="edu-chat-stage-media">
-            <video
-              key={stageSrc}
-              src={stageSrc}
-              autoPlay={!!s.lipClip}
-              loop={!s.lipClip}
-              muted={!!s.lipClip}
-              playsInline
-            />
+            {/* ⚠️ 必须恒定 autoPlay + muted：浏览器只允许**静音**自动播放；此前写成
+                autoPlay={!!lipClip} —— 没有实时口型片段时就不自动播放，而这个页面没有
+                controls 可点，用户看到的就是一张静止帧（"数字人没有待机动作"）。
+                实际音频由 Web Audio 播（TTS PCM），不依赖 video 音轨，所以恒 muted 无副作用。 */}
+            <video key={stageSrc} src={stageSrc} autoPlay loop muted playsInline />
             <div className={`edu-chat-halo${speaking ? ' on' : ''}`} />
           </div>
           <div className="edu-chat-stage-foot">

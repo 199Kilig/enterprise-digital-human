@@ -31,6 +31,16 @@ def test_teacher_persona_declares_output_constraints():
     assert "直接念出来" in prompt  # 说清"为什么不能排版"
 
 
+def test_teacher_persona_answers_concept_questions_first():
+    """实测缺陷回归：问"什么是 RAG"时模型只反问不给知识点，还垫客套话。
+
+    修正后人格必须显式要求：概念问题先给解释、禁止只反问、禁止情绪铺垫。
+    """
+    prompt = build_system_prompt("teacher")
+    for must in ("先说清知识点", "不要只反问", "客套"):
+        assert must in prompt, f"教师人格缺少该约束：{must}"
+
+
 def test_cs_persona_still_available():
     """客服人格保留（PRD §1 目标场景仍是企业客服）：切回只需改 config。"""
     assert build_system_prompt("cs") == CS_PROMPT

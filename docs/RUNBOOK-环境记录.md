@@ -527,6 +527,35 @@ ffmpeg -hide_banner -i a.png -i b.png -lavfi psnr -f null - 2>&1 | grep PSNR
   （实测输出停在半路、连接被 reset）。正确姿势：
   `nohup /root/miniconda3/bin/python -u x.py > /root/x.log 2>&1 &`，再读日志。
 
+**顺带结清：那个"~80 秒缺口"也不是前端的错**
+
+上一轮（rtf 1.065 时代）曾测到：后端 15.4s 就把 11 片全"发出"，前端却 95s 才收到
+（`createObjectURL`），一度怀疑卡在前端 JS。本次逐层排除后，结论是**它随 rtf 改善自行消失了**：
+
+| 路径 | `lip_video` 到达跨度 | 说明 |
+|---|---|---|
+| 本机 curl 直连 8010 | 4.5s → 17.2s（12.7s） | 后端发送侧正常 |
+| 本机 curl 经 Vite 5173 代理 | 4.4s → 17.3s（12.8s） | 代理不是瓶颈（带浏览器 header 测同样快） |
+| **真实浏览器（EventSource）** | **18.1s → 29.8s（11.8s）** | 与 curl 一致 |
+| **浏览器内 `createObjectURL`** | **18.07s → 29.84s** | **与事件到达仅差 3ms** |
+
+**机制**：rtf > 1 时口型产出（1065ms/片）慢于音频播放（1000ms/片），`lip_out_q` 持续积压
+（峰值正好顶到 `queue_max = 8`），叠加前端的读背压，把整条 SSE 的 `yield` 拖慢；
+rtf 降到 0.71 后队列不再积压、数据顺畅流出 —— **一个参数的改善连带修好了两个症状**。
+
+**排除法记录（下次别再从头查一遍）**：
+- 后端发送侧 ✓ 正常（本机 curl 12.7s 收完）
+- 网络 ✓（同机，无跨网环节）
+- Vite dev 代理 ✓（带 `Accept-Encoding: gzip, deflate, br` + 浏览器 UA 测，同样 14~18s）
+- 前端代码 ✓（`useLipVideo` 用 `setTimeout` 调度、`setCurrent` 每片仅一次，无高频重渲染；
+  `useDuplexSession` 用 `EventSource` 读取，本身无同步阻塞）
+- **真因：上游 rtf 造成的队列背压**
+
+**复现脚本**（都在 `%LOCALAPPDATA%\Temp\`，不入库）：
+- `sse_timeline.sh` —— 用 `curl -N` 给每个 SSE 事件打到达时间戳（含直连/经代理两种口径）
+- `p2_eventsource.py` —— CDP 起 headless Chrome，钩 `EventSource.prototype.addEventListener`
+  与 `URL.createObjectURL`，对比"事件到达 JS"与"前端可用 blob"两个时刻
+
 **相关**：`docs/_inbox/PLAN-口型链路提速-2026-09-23.md`（本次方案）、ADR-006（分片送检）。
 
 ## 4. 模型与下载源
@@ -557,3 +586,4 @@ ffmpeg -hide_banner -i a.png -i b.png -lavfi psnr -f null - 2>&1 | grep PSNR
 | 2026-09-22 | **待机素材改静帧（§3.19）**：从"最静窗口往复拼接"改为"最闭合帧静帧循环"，帧间 PSNR 37.2→48.7dB、体积 2.07MB→118KB；`STAGE_CLIPS[0]` 从 60s 讲话产物换成待机 loop（工作台默认不再循环讲话视频） |
 | 2026-09-22 | **脚本收口**：`restore-cloud-lip.sh` 修 pgrep 自杀陷阱与 ss 判据失效（坑 25）、AutoDL 开机探测时机（坑 26）；`stop.bat` 加进程归属校验；`.bat` 禁用中文 findstr 判据（坑 24） |
 | 2026-09-23 | **口型融合去 PIL 化（§3.20）**：官方 `get_image_blending` 改纯 numpy 等价实现（`deploy/lip_service.py` 的 `blend_frame`/`_to_luma`），融合 425→116ms；**单片 `total` 1065→711ms、`rtf` 1.065→0.711（真实对话 0.72~0.74）**，ADR-006 挂着的"头号补测项"结清。走过的弯路：GPU 化融合无收益（瓶颈是传输非计算）、NVENC 在 ffmpeg 4.2.7 上不认 4090 |
+| 2026-09-23 | **"~80 秒缺口"溯源结清（§3.20）**：逐层排除后端发送 ✓／网络 ✓／Vite dev 代理 ✓／前端代码 ✓（真实浏览器 EventSource 收到 11.8s、`createObjectURL` 仅晚 3ms），确认它**随 rtf 1.065→0.71 自行消失** —— 真因是上游 rtf 造成的队列背压，不是前端缺陷 |

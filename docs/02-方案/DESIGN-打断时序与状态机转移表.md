@@ -169,11 +169,11 @@ sequenceDiagram
     GW->>TTS: token流
     TTS-->>GW: seg
     GW-->>FE: tts_audio
-    TTS->>Lip: seg
-    Lip-->>GW: frame
-    GW-->>FE: lip_frame
-    Lip-->>GW: frame
-    GW-->>FE: lip_frame
+    TTS->>Lip: 1s 音频分片
+    Lip-->>GW: H.264 片段
+    GW-->>FE: lip_video
+    Lip-->>GW: H.264 片段
+    GW-->>FE: lip_video
     GW-->>FE: done
 ```
 
@@ -189,7 +189,7 @@ sequenceDiagram
     participant ASR as ASR
 
     GW-->>FE: tts_audio
-    GW-->>FE: lip_frame
+    GW-->>FE: lip_video
     FE->>GW: VAD触发打断 (POST /interrupt)
     GW-->>FE: interrupted (SSE)
     GW->>TTS: stop()

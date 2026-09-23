@@ -359,7 +359,7 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
         token_q: asyncio.Queue = asyncio.Queue()
         sentence_q: asyncio.Queue = asyncio.Queue()
         audio_q: asyncio.Queue = asyncio.Queue()
-        # 口型：整句 PCM → 云 GPU 推理 → 帧（ADR-001；SPEC §3.2 lip_frame 事件）
+        # 口型：1s 音频分片 → 云 GPU 推理 → H.264 整句片段（ADR-005/006；SPEC §3.2 lip_video 事件）
         # ⚠️ 限长 + 满则丢最旧（#6）：TTS 合成快于实时，而口型是单 GPU 串行推理，
         # 无界队列会让片段越积越多、严重滞后于音频时钟 → 音画同步直接崩
         # （RUNBOOK §3.14 的待验项：单片生成 >1000ms 就会出现积压）。

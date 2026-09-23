@@ -152,7 +152,9 @@ cd backend/eval && ../.venv/Scripts/python.exe verify_e2e_latency.py --runs 6 --
     再看 TTS 合成速率（<1 表示音频还没生成出来，口型必然追不上）。
 22. **`.bat` 必须纯 ASCII + CRLF（2026-09-14 踩）**：cmd.exe 按 **OEM 代码页**（中文 Windows = GBK）解析 .bat，
     UTF-8 的中文/emoji 会变乱码，乱码字节还可能被当成命令分隔符导致脚本行为异常。
-    `start-lip-tunnel.bat` / `start-fake-lip.bat` 曾因此不可用（`start.bat`/`stop.bat` 一直是纯 ASCII 所以没事）。
+    `start-lip-tunnel.bat` / `start-fake-lip.bat` 曾因此不可用（`start.bat`/`stop.bat` 一直是纯 ASCII 所以没事）；
+    **这两个文件后来已随隧道脚本收口一并移除**（隧道改由 `backend/deploy/restore-cloud-lip.sh` 自动建立，见 §3.12），
+    此处保留记录是因为同类脚本再引入时仍会踩这个坑。
     自检：`LC_ALL=C grep -c $'[\x80-\xff]' xxx.bat` 必须为 **0**。
     **另外禁用 `timeout /t N`**：在 git-bash/MSYS 环境里该名字被 GNU coreutils 的 `timeout` 抢走，
     报 `timeout: invalid time interval '/t'` 并中断脚本——改用 `curl --retry --retry-delay --retry-connrefused` 等待。
@@ -209,13 +211,22 @@ cd backend/eval && ../.venv/Scripts/python.exe verify_e2e_latency.py --runs 6 --
 **关机不丢任何东西**（与"换镜像"不同）：数据盘 `autodl-tmp`（8.7G 权重 + avatar 缓存 + `lip_service.py`）和系统盘（miniconda 里的 fastapi/uvicorn）都保留。
 
 1. **AutoDL 控制台开机**（选有卡模式）
-2. **启动口型服务**（约 21s 完成模型+avatar 加载）：
+2. **一键恢复**（推荐，自动完成"md5 比对传代码 → 拉起服务 → 建隧道 → 探活"）：
    ```bash
-   ssh -p 47618 root@connect.nmb1.seetacloud.com \
+   bash backend/deploy/restore-cloud-lip.sh <SSH端口>     # 端口在实例控制台的"自定义服务"里
+   ```
+   看到 `✓ 隧道通` 即成功。**失败时读它的分步输出**：`✗ SSH 不可达`＝实例还没开机完成（坑 25）；
+   `✗ 云服务未就绪`＝ssh 上去看 `/root/lip_server.log`；`✗ 隧道未通`＝端口转发被拒。
+3. **手工方式**（脚本不可用时）：
+   ```bash
+   # a) 起服务（约 21s 完成模型+avatar 加载）
+   ssh -p <端口> root@connect.nmb1.seetacloud.com \
      "cd /root/autodl-tmp/digital-human/MuseTalk && OMP_NUM_THREADS=16 \
       nohup /root/miniconda3/bin/python -m uvicorn lip_service:app --host 0.0.0.0 --port 8002 > /root/lip_server.log 2>&1 &"
+   # b) 建隧道
+   ssh -N -L 8002:127.0.0.1:8002 -p <端口> root@connect.nmb1.seetacloud.com
    ```
-3. **本机建隧道**：双击 `start-lip-tunnel.bat`（看到 `status:ok` 即成功）
+   （原 `start-lip-tunnel.bat` 已随隧道脚本收口移除，见坑 22 说明。）
 
 验证：`curl http://127.0.0.1:8002/health` → `{"status":"ok","device":"cuda:0","frames_cached":536,...}`
 

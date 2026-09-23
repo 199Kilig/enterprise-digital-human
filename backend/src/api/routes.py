@@ -163,6 +163,9 @@ def close_session(session_id: str) -> dict:
     _sessions.pop(session_id, None)
     _machines.pop(session_id, None)
     _asr_sessions.pop(session_id, None)
+    # ASR_DEBUG 采集缓冲也必须一起释放：否则关会话后已累积的 PCM 永久驻留内存
+    # （外部审查只发现了 AsrError 一处，close_session 是同一类路径，一并修）
+    _asr_capture.pop(session_id, None)
     return {"status": "closed"}
 
 
@@ -275,6 +278,7 @@ def asr_chunk(req: AsrChunkRequest) -> dict:
         chunk = asr.push(audio, is_last=req.end)
     except AsrError as exc:
         _asr_sessions.pop(req.session_id, None)
+        _asr_capture.pop(req.session_id, None)  # 异常路径同样要释放采集缓冲，否则泄漏
         raise HTTPException(status_code=503, detail={"code": exc.code, "message": exc.message}) from exc
 
     payload = {

@@ -22,7 +22,7 @@ python backend/eval/prewarm_asr.py
 ```
 
 ⚠️ 三条注意：
-- **口型需要云 GPU**：`lip_service.reachable=false` 时只有声音没有口型画面。要看口型，先开 AutoDL 实例 + 双击 `start-lip-tunnel.bat`（见 RUNBOOK §3.12）。
+- **口型需要云 GPU**：`lip_service.reachable=false` 时只有声音没有口型画面。要看口型，先开 AutoDL 实例，再跑 `bash backend/deploy/restore-cloud-lip.sh <SSH端口>`（见 RUNBOOK §3.12）。
 - **实测期间别重启后端**：重启会丢掉已加载的 ASR 模型，要重新预热。
 - 浏览器地址用 `127.0.0.1:5173`（不要 `localhost`，本机名字解析约 2s/次，RUNBOOK 坑 20）。
 
@@ -132,7 +132,7 @@ cd backend/eval && ../.venv/Scripts/python.exe verify_asr_mic_accuracy.py
 | 说完不收尾 | 环境底噪过高 → 跑 `python backend/eval/verify_asr_endpoint.py` 看标定；把环境告诉我 |
 | 播报中自己打断自己 | AEC 不足（§4）→ 调高 `BARGE_MULT`/`BARGE_FRAMES` |
 | 第一次说话等很久 | 忘了预热（`prewarm_asr.py`） |
-| 只有声音没有口型 | 云 GPU 没开 / 隧道没起（`start-lip-tunnel.bat`，`health.lip_service.reachable` 应为 true） |
+| 只有声音没有口型 | 云 GPU 没开 / 隧道没起（跑 `bash backend/deploy/restore-cloud-lip.sh <SSH端口>`，`health.lip_service.reachable` 应为 true） |
 
 ---
 

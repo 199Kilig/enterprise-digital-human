@@ -158,6 +158,19 @@ cd backend/eval && ../.venv/Scripts/python.exe verify_e2e_latency.py --runs 6 --
     报 `timeout: invalid time interval '/t'` 并中断脚本——改用 `curl --retry --retry-delay --retry-connrefused` 等待。
 23. **Python 脚本打印 emoji 在 GBK 控制台会崩（2026-09-14 踩，已复现）**：`print("⚠️")` 抛
     `UnicodeEncodeError: 'gbk' codec can't encode character '\u26a0'`，**服务/脚本当场退出**。
+25. **`pgrep -f '<服务名>'` 会匹配执行它的 shell 自身（2026-09-22 实测，`restore-cloud-lip.sh` 踩到）**：
+    判据写成 `pgrep -f 'uvicorn lip_service'` 时，这条命令的**命令行字符串本身**就含 `uvicorn lip_service`，
+    pgrep 会匹配到执行它的 bash → 永远返回「已存在」→ **服务永远不会被启动**，而脚本还会打印
+    「已有在跑的服务，跳过启动」，看起来像成功 —— 静默失败，最坏的那种。
+    规避：判据用**服务可用性**而不是进程存在性 —— `curl -s -m 5 http://127.0.0.1:8002/health | grep -q 'status.:.ok'`；
+    非要用 pgrep 就写 `pgrep -f '[u]vicorn lip_service'`（字符类破坏自匹配）。
+    附带实测：这台 AutoDL 实例上 `ss -ltn` 与 `netstat -ltn` **都报不出**监听端口（输出为空），
+    所以「改用端口监听」也救不了 —— health 探测是唯一可靠的一条判据。
+26. **AutoDL 开机后立刻探测 SSH 会失败，别急着断定端口变了（2026-09-22 实测）**：实例刚点开机时
+    `ssh -p 47618` 报 `Connection reset by peer`（与「实例已关机」的症状**完全相同**，见上文第 210 行那段记录），
+    但实例真正跑起来后 **SSH 端口可能保持不变**。处置顺序：控制台确认实例状态 → 隔 1~2 分钟重试**旧端口** →
+    仍不通再去找新端口。一看到 reset 就换端口会白折腾。
+
     双保险：① 脚本顶部 `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`；
     ② .bat 里先 `chcp 65001 >nul` 再调 Python。已在 `fake_lip_server.py` / `verify_e2e_lip.py` / `verify_lip_sync.py` 落地。
 24. **`.bat` 里不要用中文/非 ASCII 字符串做 `findstr` 匹配（2026-09-22 踩，dry-run 复现）**：

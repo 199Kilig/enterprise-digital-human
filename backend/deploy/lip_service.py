@@ -35,7 +35,6 @@ if MUSETALK_ROOT not in sys.path:
     sys.path.insert(0, MUSETALK_ROOT)
 
 from musetalk.utils.audio_processor import AudioProcessor  # noqa: E402
-from musetalk.utils.blending import get_image_blending  # noqa: E402
 from musetalk.utils.preprocessing import read_imgs  # noqa: E402
 from musetalk.utils.utils import datagen, load_all_model  # noqa: E402
 
@@ -45,6 +44,55 @@ SAMPLE_RATE = 16000
 FPS_DEFAULT = 25
 # 传输载体默认值（ADR-005）：h264 = 整句 H.264 片段；frames = 逐帧 JPEG（P1 兼容，A/B 对照用）
 TRANSPORT_DEFAULT = os.environ.get("LIP_TRANSPORT", "h264")
+
+
+def _to_luma(mask: np.ndarray) -> np.ndarray:
+    """等价 PIL `Image.convert("L")`：3 通道 → 单通道。
+
+    官方 blending.py 的 get_image_blending 里有这一步；云端 mask PNG 以 3 通道存盘，
+    实测三通道取值相同（E3），故取首通道即可。
+    """
+    if mask.ndim == 2:
+        return mask
+    if mask.ndim == 3 and mask.shape[2] == 3:
+        if (np.array_equal(mask[:, :, 0], mask[:, :, 1])
+                and np.array_equal(mask[:, :, 0], mask[:, :, 2])):
+            return mask[:, :, 0]
+        return (0.299 * mask[:, :, 0] + 0.587 * mask[:, :, 1]
+                + 0.114 * mask[:, :, 2]).astype(np.uint8)
+    raise ValueError(f"不支持的 mask 形状: {mask.shape}")
+
+
+def blend_frame(ori: np.ndarray, face_up: np.ndarray, bbox, mask: np.ndarray,
+                crop_box) -> np.ndarray:
+    """把生成脸融合回原图（等价官方 `get_image_blending`，但不用 PIL）。
+
+    **为什么重写**（2026-09-23 实测 E4）：官方实现每帧做 2 次 numpy↔PIL 全图复制
+    （`Image.fromarray(image[:, :, ::-1])` 的负步长切片强制拷贝 2.5MB）、固定 mask 每帧
+    `convert("L")`、以及 PIL 带 mask 的 paste（Python 层）。纯 numpy 重写后：
+      PIL 413ms/25帧 (16.5ms/帧) → numpy 116ms/25帧 (4.65ms/帧) = **3.6x**
+      且与官方实现**逐像素完全一致**（maxdiff=0）。
+    另测 torch GPU 版只快 1.0x —— 瓶颈是每帧 ~5.7MB 的 H2D/D2H 传输而非计算，
+    且融合结果最终要回 CPU 交给 ffmpeg，故此处刻意不碰显卡。
+
+    PIL 语义：body.paste(face_large, crop_box[:2], mask_image)
+            → 区域内 out = merged*a + base*(1-a)，a = mask/255
+    """
+    x, y, x1, y1 = bbox
+    x_s, y_s, x_e, y_e = crop_box
+    mask_l = _to_luma(mask)
+    if mask_l.shape != (y_e - y_s, x_e - x_s):
+        raise ValueError(f"mask 形状 {mask_l.shape} 与 crop_box 区域 "
+                         f"{(y_e - y_s, x_e - x_s)} 不符")
+
+    a = mask_l[..., None].astype(np.float32) / 255.0
+    out = ori.copy()
+    region = out[y_s:y_e, x_s:x_e]                      # 视图
+    merged = region.copy()
+    merged[y - y_s:y1 - y_s, x - x_s:x1 - x_s] = face_up
+    # RHS 的 region 此时仍是原值，与 PIL 的 body*(1-a) + face_large*a 一致
+    out[y_s:y_e, x_s:x_e] = np.rint(merged * a + region * (1.0 - a)).astype(np.uint8)
+    return out
 
 
 class LipEngine:
@@ -185,7 +233,8 @@ class LipEngine:
                 continue
             mask = self.mask_list_cycle[idx % len(self.mask_list_cycle)]
             mask_box = self.mask_coords_list_cycle[idx % len(self.mask_coords_list_cycle)]
-            yield idx, get_image_blending(ori_frame, res_up, bbox, mask, mask_box)
+            # 官方 get_image_blending 的 numpy 等价实现（E4 实测：3.6x 且 maxdiff=0）
+            yield idx, blend_frame(ori_frame, res_up, bbox, mask, mask_box)
 
     def _stats(self, base: dict, blend_ms: float, n_out: int, fps: int,
                total_ms: float, audio_s: float) -> dict:

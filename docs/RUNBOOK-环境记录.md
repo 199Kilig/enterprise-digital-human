@@ -467,6 +467,68 @@ ffmpeg -hide_banner -i a.png -i b.png -lavfi psnr -f null - 2>&1 | grep PSNR
 ⚠️ **`frontend/src/data/stageClips.ts` 的 `STAGE_CLIPS[0]` 就是默认播放项**：待机必须排第一。
 它原本是 `avatar_v01.mp4`（60s **讲话**产物）→ 工作台一打开就是"嘴巴一直在动"。
 
+### 3.20 口型融合去 PIL 化：单片 rtf 1.07 → 0.71（2026-09-23）
+
+**问题**：ADR-006 负面栏挂着的"头号补测项"——"需实测确认单片耗时 < 1000ms，否则队列会积压"。
+实测 `total=1065ms > chunk_ms=1000ms`，即 **rtf 1.065 > 1**：口型产出慢于音频播放，队列只会越积越深。
+
+**分解（云上 4090 实测）**：
+
+| 环节 | 耗时 | 说明 |
+|---|---|---|
+| audio（whisper 特征） | 12ms | 已快 |
+| gen（GPU 推理 25 帧） | 290ms | 已快（86fps） |
+| **blend（融合）** | **425ms** | **最大单项** |
+| 编码（libx264 veryfast crf26） | ~338ms | 见下"NVENC 不可用" |
+
+**走过的三条弯路（别再走）**：
+
+1. **GPU 化融合无收益（1.0x）**。用 torch 重写融合、与官方**逐像素一致（maxdiff=0）**，
+   但 15.76ms/帧 vs PIL 16.54ms/帧——**瓶颈是每帧 ~5.7MB 的 H2D/D2H 传输与张量分配，不是计算**；
+   而融合结果最终要回 CPU 交给 ffmpeg，**D2H 躲不掉**。
+2. **NVENC 不可用**。`ffmpeg 4.2.7`（2019）的 NVENC SDK 不认 RTX 4090（Ada，2022）：
+   `OpenEncodeSessionEx failed: unsupported device (2)` / `No NVENC capable devices found`。
+   要用得升级 ffmpeg，**代价大于收益**（可能危及当前已跑通的镜像环境）。
+3. **"融合放线程与 GPU 重叠"更慢**（见 `_recon_frames` 内注释，2026-09-14 实测：
+   GPU 51.4fps→23.5fps、端到端 7.8s→9.4s）。
+
+**解法：去掉 PIL，改纯 numpy**（`deploy/lip_service.py` 的 `blend_frame` + `_to_luma`）。
+
+官方 `get_image_blending` 每帧做 2 次 numpy↔PIL 全图复制（`Image.fromarray(image[:,:,::-1])`
+的负步长切片**强制拷贝 2.5MB**）、固定 mask 每帧 `convert("L")`、PIL 带 mask 的 paste（Python 层）。
+其语义是 crop_box 区域内的 `out = merged*a + base*(1-a)`，纯 numpy 直接算即可：
+
+| 实现 | 25 帧耗时 | 每帧 | 与 PIL 数值差 |
+|---|---|---|---|
+| PIL 官方 | 413ms | 16.54ms | 基准 |
+| torch GPU | 394ms | 15.76ms | maxdiff = 0 |
+| **numpy 纯 CPU** | **116ms** | **4.65ms** | **maxdiff = 0** |
+
+⚠️ **`mask` 是 3 通道**（实测 `(362,362,3)`，灰度图以 RGB 存盘），官方靠 `convert("L")` 降维。
+实测三通道取值相同 → 取首通道即可；不同则需走 ITU-R 601-2 加权公式。
+**漏掉这一步会直接报张量维度错**（`size of tensor a (362) must match tensor b (3)`）。
+
+**效果（云侧服务实测，真实对话负载）**：
+
+| 指标 | 改前 | 改后 |
+|---|---|---|
+| `total` | 1065ms | **711~737ms** |
+| **`rtf`** | **1.065（>1）** | **0.72~0.74（<1）** |
+| blend + 编码 | 763ms | ~401ms |
+
+**两个附带发现**：① 真实对话里 `mp4=73~75KB`（此前记录的"479~494KB"已过时，实际小 6 倍）；
+② **GPU 空闲后首次调用会掉速**（86fps → 8.5fps，尾片 `total=1847ms`，与 bench 冷启动同速）
+——要测稳态必须先预热；线上片间隔约 1s，通常不会长时间空闲。
+
+**在云上跑 bench 的两个坑**：
+- **必须截短音频**：`lip_bench.py` 拿 48s 的 `yongen.wav` 跑 `list(gen_frames(...))`，
+  1200 帧的 VAE 解码中间激活会撑爆 24GB（`21.31 GiB already allocated`）。线上是 1s/片，不会触发。
+- **必须 `nohup` 分离**：`ssh host 'python x.py'` 直连跑长任务时，**SSH 一抖远端进程就被 SIGHUP 杀掉**
+  （实测输出停在半路、连接被 reset）。正确姿势：
+  `nohup /root/miniconda3/bin/python -u x.py > /root/x.log 2>&1 &`，再读日志。
+
+**相关**：`docs/_inbox/PLAN-口型链路提速-2026-09-23.md`（本次方案）、ADR-006（分片送检）。
+
 ## 4. 模型与下载源
 
 - 模型权重国内优先 **ModelScope**（DESIGN §5.4 坑 2）：FunASR（paraformer-zh-streaming + fsmn-vad）、CosyVoice2、MuseTalk 权重
@@ -494,3 +556,4 @@ ffmpeg -hide_banner -i a.png -i b.png -lavfi psnr -f null - 2>&1 | grep PSNR
 | 2026-09-22 | **首页改真实数据总览（ADR-009）**：默认路由 6 张占位卡换成真实运行数据（health / metrics / 延迟预算 / 诊断推导），learning.ts 降级为工具页数据源；侧栏补回首页入口（此前 8 个链接 0 个指向 `/`） |
 | 2026-09-22 | **待机素材改静帧（§3.19）**：从"最静窗口往复拼接"改为"最闭合帧静帧循环"，帧间 PSNR 37.2→48.7dB、体积 2.07MB→118KB；`STAGE_CLIPS[0]` 从 60s 讲话产物换成待机 loop（工作台默认不再循环讲话视频） |
 | 2026-09-22 | **脚本收口**：`restore-cloud-lip.sh` 修 pgrep 自杀陷阱与 ss 判据失效（坑 25）、AutoDL 开机探测时机（坑 26）；`stop.bat` 加进程归属校验；`.bat` 禁用中文 findstr 判据（坑 24） |
+| 2026-09-23 | **口型融合去 PIL 化（§3.20）**：官方 `get_image_blending` 改纯 numpy 等价实现（`deploy/lip_service.py` 的 `blend_frame`/`_to_luma`），融合 425→116ms；**单片 `total` 1065→711ms、`rtf` 1.065→0.711（真实对话 0.72~0.74）**，ADR-006 挂着的"头号补测项"结清。走过的弯路：GPU 化融合无收益（瓶颈是传输非计算）、NVENC 在 ffmpeg 4.2.7 上不认 4090 |

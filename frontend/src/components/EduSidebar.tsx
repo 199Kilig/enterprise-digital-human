@@ -2,31 +2,42 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import type { HealthResponse } from '../types'
 import type { Theme } from '../hooks/useTheme'
-import { learningTools } from '../data/learning'
 import {
   IconBot,
-  IconBook,
-  IconCrown,
   IconGauge,
   IconHistory,
   IconLedger,
-  IconMistake,
   IconRefresh,
+  IconSparkle,
   IconTarget,
-  IconTool,
   IconTrend,
-  IconVideo,
 } from './edu/Icons'
+
+/**
+ * 侧栏（信息架构 2026-09-23 重构）
+ * ---------------------------------------------------------------------------
+ * 产品视角（主导航，4 项）：学习目标 / 对话辅导 / 学习洞察 / 数字人资产
+ *
+ * 重构前主导航只有「学习目标」一项 —— `/console` 对话页**不在主导航里**，
+ * 用户只能点侧栏助手卡或「查看全部历史对话」进入，这是"界面像半成品"的直接原因之一。
+ *
+ * 已移除：
+ *   · 「学习工具」4 格（错题集合/视频讲解/知识库/阶段目标）—— 全部指向 `/tools/:key`
+ *     占位页，无后端数据源；其能力由 `/insights`（真数据）+ 页尾「待接入能力」承接。
+ *   · 「小奈 Pro」卡片 —— 只有一个 `disabled` 按钮写着"敬请期待"，是纯装饰。
+ *     （依据：飞书卡片规范「盲目使用卡片设计，会使得阅读低效和屏幕空间浪费」）
+ */
 
 /** 与 pages/ConsolePage.tsx 共用同一个落盘 key：这里读的是**真实**本地对话历史 */
 const STORAGE_KEY = 'dh.console.session.v1'
 
-const TOOL_ICONS: Record<string, typeof IconTool> = {
-  mistakes: IconMistake,
-  videos: IconVideo,
-  knowledge: IconBook,
-  stage: IconTrend,
-}
+/** 主导航：产品视角的四个入口 */
+const MAIN_NAV = [
+  { to: '/', label: '学习目标', hint: '首页 · 运行总览', Icon: IconTarget, end: true },
+  { to: '/console', label: '对话辅导', hint: '和数字人实时对话', Icon: IconSparkle, end: false },
+  { to: '/insights', label: '学习洞察', hint: '提问统计与记录', Icon: IconTrend, end: false },
+  { to: '/library', label: '数字人资产', hint: '形象 · 产物 · 服务', Icon: IconBot, end: false },
+]
 
 const ENG_VIEWS = [
   { to: '/studio', label: '链路工作台', hint: '技术详情', Icon: IconBot },
@@ -124,22 +135,25 @@ export default function EduSidebar({
         {online ? '已连接 · 数字人链路在线' : health ? '探测中' : '尚未连接'}
       </span>
 
-      {/* 显式的主导航入口。end 必须有：否则 to="/" 在 /console 等路径上也会算 active */}
+      {/* 主导航（产品视角）。end 必须有：否则 to="/" 在 /console 等路径上也会算 active */}
       <nav className="edu-side-nav">
-        <NavLink
-          to="/"
-          end
-          onClick={onClose}
-          className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}
-        >
-          <IconTarget size={15} />
-          <span>
-            <div>学习目标</div>
-            <div className="muted" style={{ fontSize: 'var(--fs-micro)' }}>
-              首页 · 学习仪表盘
-            </div>
-          </span>
-        </NavLink>
+        {MAIN_NAV.map(({ to, label, hint, Icon, end }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={end}
+            onClick={onClose}
+            className={({ isActive }) => `navitem${isActive ? ' active' : ''}`}
+          >
+            <Icon size={15} />
+            <span>
+              <div>{label}</div>
+              <div className="muted" style={{ fontSize: 'var(--fs-micro)' }}>
+                {hint}
+              </div>
+            </span>
+          </NavLink>
+        ))}
       </nav>
 
       <section className="edu-side-block">
@@ -161,51 +175,13 @@ export default function EduSidebar({
               </li>
             ))
           ) : (
-            <li className="edu-empty">暂无本地对话记录，点「查看全部历史对话」开始提问</li>
+            <li className="edu-empty">暂无本地对话记录，去「对话辅导」问一句就有了</li>
           )}
         </ul>
-        <Link className="edu-cta" to="/console" onClick={onClose} style={{ marginTop: 'var(--sp-2)' }}>
-          查看全部历史对话 <span>›</span>
+        <Link className="edu-cta" to="/insights" onClick={onClose} style={{ marginTop: 'var(--sp-2)' }}>
+          查看学习洞察 <span>›</span>
         </Link>
       </section>
-
-      <section className="edu-side-block">
-        <div className="edu-side-head">
-          <IconTool size={14} />
-          学习工具
-        </div>
-        <div className="edu-tools">
-          {learningTools.map((t) => {
-            const Icon = TOOL_ICONS[t.key] ?? IconTool
-            return (
-              <Link
-                key={t.key}
-                to={`/tools/${t.key}`}
-                onClick={onClose}
-                className={`edu-tool${t.status === 'planned' ? ' planned' : ''}`}
-                title={t.desc}
-              >
-                <span className="edu-tool-ico">
-                  <Icon size={16} />
-                </span>
-                {t.name}
-              </Link>
-            )
-          })}
-        </div>
-      </section>
-
-      <div className="edu-pro">
-        <div className="edu-pro-head">
-          <IconCrown size={15} />
-          小奈 Pro
-          <span className="edu-pro-tag">报告</span>
-        </div>
-        <div className="edu-pro-sub">解锁更强模型与高级能力</div>
-        <button className="edu-pro-btn" disabled>
-          敬请期待
-        </button>
-      </div>
 
       <section className="edu-side-block">
         <div className="edu-side-head">
@@ -252,7 +228,9 @@ export default function EduSidebar({
             </button>
           </div>
         </div>
-        <span className="edu-demo-note">学习域数据为前端演示占位（后端未接学习域接口）</span>
+        <span className="edu-demo-note">
+          学习洞察的统计来自本机对话记录（浏览器本地，最多保留最近 50 条），不上传
+        </span>
         <div>
           工程数据来源：backend/eval/reports/*.json · docs/eval-history.md
           <br />

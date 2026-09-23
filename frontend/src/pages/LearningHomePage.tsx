@@ -21,7 +21,8 @@ const RingProgress = lazy(() => import('../components/edu/RingProgress'))
  * 数据口径：**全部来自后端真实只读接口** —— GET /api/v1/health、GET /api/v1/metrics
  * （后端读 backend/eval/reports/*.json）。页面上每个数字都能回溯到接口或报告文件。
  * 后端不可达时显示错误态并提供重试，**不做静态兜底**：展示查不到来源的数字正是本次
- * 改版要消除的问题（此前的学习域占位卡片已按 ADR-009 下线，learning.ts 仅供工具页使用）。
+ * 改版要消除的问题。此前的学习域占位卡片已按 ADR-009 下线；原先仅供 `/tools/:key`
+ * 占位页使用的 `data/learning.ts` 也已在 2026-09-23 的前端重构中整体移除。
  * 交互真实性：「开始对话」进入 /console 的**真实** SSE 链路（流式 ASR → DeepSeek → CosyVoice + 打断）。
  */
 

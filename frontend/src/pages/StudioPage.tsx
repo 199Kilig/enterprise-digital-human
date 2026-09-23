@@ -33,7 +33,13 @@ export default function StudioPage() {
       label: '本轮音频',
       value: s.audioStats ? `${(s.audioStats.ms / 1000).toFixed(2)}s / ${s.audioStats.words} 词` : '—',
     },
-    { label: '口型', value: '未接入' },
+    {
+      label: '口型',
+      value:
+        s.lipStats.segments > 0
+          ? `H.264 片段 ×${s.lipStats.segments}（实时）`
+          : '实时链路已接入 · 待本轮',
+    },
     { label: '分辨率', value: rt?.output_resolution ?? '—' },
     { label: '峰值显存', value: rt?.peak_vram_mib ? `${rt.peak_vram_mib} MiB` : '—' },
   ]
@@ -76,7 +82,7 @@ export default function StudioPage() {
           <div className="panel">
             <div className="panel-head">
               <h2>数字人舞台</h2>
-              <span className="hint">产物：云 GPU MuseTalk 推理输出（V-01）</span>
+              <span className="hint">产物：云 GPU MuseTalk 真实推理输出（待机 idle 静帧 / V-01）</span>
               <div className="grow" />
               <span className="badge">{rt?.gpu ?? 'GPU 未记录'}</span>
             </div>
@@ -116,8 +122,10 @@ export default function StudioPage() {
               `config.yaml llm.persona`）→ CosyVoice v2 流式合成（16k PCM 首包即播 + word 级时间戳），
               送合成前经 <span className="num">brain/text_clean</span> 清理格式噪音（ADR-008）。
               一轮结束状态机走完整转移（thinking → speaking → listening）。
-              <b>「演」未接入</b>：舞台上播放的是云 GPU V-01 预生成产物，尚未与本轮音频做口型对齐
-              （口型帧调度将以 TTS 时间戳为时钟基准，见 SPEC §4.3）。
+              <b>「演」已接入</b>：音频按 ~1s 分片送云 GPU MuseTalk 推理，回传 H.264 整句片段
+              （ADR-005/006），前端按**音频时钟**排期播放。
+              <b>已知偏差</b>：口型生成慢于语音播报，片段到达时通常已过 start_ms，前端策略是立即从头播放
+              （不丢帧、不假装同步）—— 真实偏差量见上方「音画偏差」行。
             </span>
           </div>
 

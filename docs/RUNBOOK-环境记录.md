@@ -436,6 +436,37 @@ MSYS_NO_PATHCONV=1 taskkill /F /PID <pid>
 `[tts] 送合成: '...'`（若发生过清理，同行附 `(原文: ...)`）。
 用来核对"喂给 TTS 的是不是干净文本"（ADR-008），默认关闭。
 
+### 3.19 待机（idle）素材：必须用静帧，不能用"最静窗口"（2026-09-22 修订）
+
+**做法**：取静音驱动产出里**嘴唇最闭合的一帧**，编成静止循环。
+
+```bash
+# ① 抽候选帧 → 裁出嘴部区域 → 拼网格图，挑唇线最平、无唇间暗区的那帧
+ffmpeg -i 源.mp4 -vf "select='not(mod(n\,6))',crop=220:130:210:380,scale=330:195,tile=4x2" -frames:v 1 -y grid.png
+# ② 定帧 → 静帧循环（tune stillimage = 单 I 帧 + 空 P 帧，体积最小）
+ffmpeg -i 源.mp4 -vf "select=eq(n\,0)" -vframes 1 -y best.png
+ffmpeg -loop 1 -i best.png -t 2 -r 25 -c:v libx264 -pix_fmt yuv420p -tune stillimage -crf 20 -movflags +faststart -y avatar_idle.mp4
+```
+
+**校验别靠肉眼，用 PSNR**：
+
+```bash
+ffmpeg -i avatar_idle.mp4 -vf "select=eq(n\,0)" -vframes 1 -y a.png
+ffmpeg -i avatar_idle.mp4 -vf "select=eq(n\,40)" -vframes 1 -y b.png
+ffmpeg -hide_banner -i a.png -i b.png -lavfi psnr -f null - 2>&1 | grep PSNR
+```
+
+| 版本 | 帧间 PSNR | 体积 | 观感 |
+|---|---|---|---|
+| 旧：静音驱动 + "最静 1 秒窗口"往复拼接（48 帧/1.92s） | **37.2 dB** | 2.07 MB | 待机时**嘴巴一直在动**（用户报障） |
+| 新：最闭合帧静帧循环（50 帧/2s） | **48.7 dB** | **118 KB** | 视觉静止 |
+
+**为什么"最静窗口"不够**：MuseTalk 是音频驱动模型，静音驱动时**仍会输出小幅口型**——
+"最静"只保证动得小，不保证不动。要真静止只能"选帧 + 静帧编码"。
+
+⚠️ **`frontend/src/data/stageClips.ts` 的 `STAGE_CLIPS[0]` 就是默认播放项**：待机必须排第一。
+它原本是 `avatar_v01.mp4`（60s **讲话**产物）→ 工作台一打开就是"嘴巴一直在动"。
+
 ## 4. 模型与下载源
 
 - 模型权重国内优先 **ModelScope**（DESIGN §5.4 坑 2）：FunASR（paraformer-zh-streaming + fsmn-vad）、CosyVoice2、MuseTalk 权重
@@ -460,3 +491,6 @@ MSYS_NO_PATHCONV=1 taskkill /F /PID <pid>
 | 2026-09-17 | **修两个真机才暴露的缺陷（§3.17）**：① `useMicCapture` 异步 start 撞只读守卫 → "识别只能用一次"（epoch + 抢占 + 完成后核对）；② ASR 冷启动 22s → "初次说话无反应"（lifespan 后台预热，实测首片 227ms） |
 | 2026-09-19 | **教育场景门面 + 语音文本治理**：前端教育皮肤与「学习目标」门面（默认路由；学习域数据前端单点占位并标注「演示数据」）；后端人格外置 `brain/persona.py`（`teacher` 默认 / `cs` 可切）+ TTS 前文本清理 `brain/text_clean.py`（ADR-007/008）；SPEC v1.10、DESIGN §4.4 同步；后端重启坑与 `TTS_DEBUG` 见 §3.18 |
 | 2026-09-17 | **配置中心收口（§3.16）**：`asr` 段 6 字段代码从不读取且 `chunk_size` 值与实现不符 → `model`/`chunk_size` 接回代码、删除 4 个名义项；顺带修正 DESIGN 目录图（`vad/` 已删） |
+| 2026-09-22 | **首页改真实数据总览（ADR-009）**：默认路由 6 张占位卡换成真实运行数据（health / metrics / 延迟预算 / 诊断推导），learning.ts 降级为工具页数据源；侧栏补回首页入口（此前 8 个链接 0 个指向 `/`） |
+| 2026-09-22 | **待机素材改静帧（§3.19）**：从"最静窗口往复拼接"改为"最闭合帧静帧循环"，帧间 PSNR 37.2→48.7dB、体积 2.07MB→118KB；`STAGE_CLIPS[0]` 从 60s 讲话产物换成待机 loop（工作台默认不再循环讲话视频） |
+| 2026-09-22 | **脚本收口**：`restore-cloud-lip.sh` 修 pgrep 自杀陷阱与 ss 判据失效（坑 25）、AutoDL 开机探测时机（坑 26）；`stop.bat` 加进程归属校验；`.bat` 禁用中文 findstr 判据（坑 24） |

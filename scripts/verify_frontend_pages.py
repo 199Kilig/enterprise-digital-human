@@ -7,7 +7,14 @@
      （P4 把硬编码 rgba 提成 token，深色块的覆盖必须真的生效）。
   3. `/library` 能渲染，且在后端不可达时显示**降级态**（不假装在线）。
 
-用法：先 `npm run preview -- --port 4173`，再 `python scripts/verify_frontend_pages.py`
+用法：
+  1) 起前端：`npm run dev`（5173，推荐 —— localStorage 与真实使用一致）
+     或 `npm run preview -- --port 4173`
+  2) 跑：
+     VERIFY_BASE_URL=http://127.0.0.1:5173 backend/.venv/Scripts/python.exe scripts/verify_frontend_pages.py
+
+⚠️ 必须用 `backend/.venv` 的 python —— 脚本依赖 `websockets`（Hermes 自带解释器没有）。
+   默认 BASE 为 4173；用 VERIFY_BASE_URL 指到 dev server 或其它端口。
 """
 
 import json
@@ -22,7 +29,8 @@ import time
 import urllib.request
 import urllib.parse
 
-BASE = "http://127.0.0.1:4173"
+BASE = os.environ.get("VERIFY_BASE_URL", "http://127.0.0.1:4173")
+BASE_PORT = int(BASE.rstrip("/").rsplit(":", 1)[-1])
 CDP_PORT = 9444
 
 
@@ -51,8 +59,9 @@ def wait_port(port: int, timeout: float = 20.0) -> bool:
 
 
 def main() -> int:
-    if not wait_port(4173, 15):
-        print("✗ preview (4173) 未就绪，请先跑 npm run preview -- --port 4173")
+    if not wait_port(BASE_PORT, 15):
+        print(f"✗ {BASE} 未就绪。dev 用 `npm run dev`，preview 用 `npm run preview`；"
+              f"再以 VERIFY_BASE_URL 指向对应端口")
         return 2
 
     chrome = find_chrome()
@@ -198,7 +207,13 @@ def main() -> int:
 
                 # ---------- 3. /library 渲染与降级态 ----------
                 await cmd("Page.navigate", url=f"{BASE}/library")
-                time.sleep(3.0)
+                time.sleep(5.0)
+                # 自测：CDP 环境下 fetch 自身可用吗（区分"页面没发起"与"请求没回来"）
+                probe = await ev(
+                    "fetch('/api/v1/health').then(r => r.status + ' ' + r.statusText)"
+                    ".catch(e => 'FETCH_ERR: ' + e)"
+                )
+                print("  fetch 自测:", probe)
                 lib = await ev(
                     "(() => ({"
                     "  hasHead: !!document.querySelector('.edu-page-head h1'),"

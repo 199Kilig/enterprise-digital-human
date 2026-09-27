@@ -234,7 +234,7 @@ export default function EduSidebar({
         <div>
           工程数据来源：backend/eval/reports/*.json · docs/eval-history.md
           <br />
-          契约：SPEC-接口与协议规范 v1.1
+          契约：SPEC-接口与协议规范 v1.10
         </div>
       </footer>
     </aside>

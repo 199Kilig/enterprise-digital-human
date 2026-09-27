@@ -43,6 +43,15 @@ function displayText(m: ChatMessage): string {
   return m.text
 }
 
+/**
+ * 麦克风权限类错误**不是链路故障**（实测：headless / 无麦克风设备 / 用户拒绝授权时触发）。
+ * 此时打字通道完全可用、LLM 与 TTS 都正常，所以不能显示成「链路出了点问题」——
+ * 那会让用户以为整个系统坏了。走单独的提示样式与措辞。
+ */
+function isMicError(text: string): boolean {
+  return text.includes('麦克风') || text.includes('Permission denied')
+}
+
 export default function ConsolePage() {
   const s = useDuplexSession()
   const [draft, setDraft] = useState('')
@@ -159,8 +168,15 @@ export default function ConsolePage() {
           </div>
 
           {s.error && (
-            <div className="edu-chat-alert">
-              链路出了点问题：{s.error}
+            <div className={`edu-chat-alert${isMicError(s.error) ? ' mic' : ''}`}>
+              {isMicError(s.error) ? (
+                <>
+                  <strong>麦克风不可用</strong>：{s.error}。<strong>打字提问不受影响</strong>
+                  ，对话链路本身是正常的。
+                </>
+              ) : (
+                <>链路出了点问题：{s.error}</>
+              )}
               <span className="edu-chat-alert-hint">详细读数见侧栏「工程视图 → 链路工作台」</span>
             </div>
           )}

@@ -1736,6 +1736,14 @@
   font-size: var(--fs-sm);
 }
 
+/* 麦克风类提示：不是链路故障，用中性色而非品牌/警示色，避免"整个系统坏了"的误读 */
+.edu-chat-alert.mic {
+  background: var(--bg-raised);
+  border-color: var(--border-strong);
+  border-style: solid;
+  color: var(--text-secondary);
+}
+
 .edu-chat-alert-hint {
   display: block;
   margin-top: 2px;

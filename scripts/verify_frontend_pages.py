@@ -234,7 +234,49 @@ def main() -> int:
                 if lib["pending"] < 2:
                     failures.append("/library 待接入能力应列出 ≥2 项")
 
-                # ---------- 4. 旧占位路由必须已下线 ----------
+                # ---------- 4. /console 真实链路（LLM + TTS 必须都通）----------
+                await cmd("Page.navigate", url=f"{BASE}/console")
+                time.sleep(3.0)
+                typed = await ev(
+                    "(() => { const inp = document.querySelector('.edu-chat-input input');"
+                    "  if (!inp) return 'NO_INPUT';"
+                    "  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;"
+                    "  setter.call(inp, '通分是什么意思');"
+                    "  inp.dispatchEvent(new Event('input', { bubbles: true }));"
+                    "  return 'TYPED'; })()"
+                )
+                clicked = await ev(
+                    "(() => { const b = document.querySelector('.edu-chat-send');"
+                    "  if (!b) return 'NO_SEND'; if (b.disabled) return 'DISABLED';"
+                    "  b.click(); return 'CLICKED'; })()"
+                )
+                print(f"  /console 输入={typed} 发送={clicked}")
+                # 实测一轮回答 ~14s，留足余量
+                await asyncio.sleep(30)
+                conv = await ev(
+                    "(() => ({"
+                    "  bubbles: document.querySelectorAll('.edu-bubble-row').length,"
+                    "  digitalText: Array.from(document.querySelectorAll('.edu-bubble.digital'))"
+                    "    .map(e => e.textContent || '').join(' ').slice(0, 140),"
+                    "  state: document.querySelector('.edu-chat-state')?.textContent?.trim() || '',"
+                    "  alert: document.querySelector('.edu-chat-alert')?.textContent?.trim() || ''"
+                    "}))()"
+                )
+                print("  /console:", json.dumps(conv, ensure_ascii=False))
+                if conv["bubbles"] < 2:
+                    failures.append(f"/console 气泡数应 ≥2（用户提问 + 数字人回答），实际 {conv['bubbles']}")
+                if len(conv["digitalText"]) < 10:
+                    failures.append(f"/console 未出现数字人回答文本：{conv['digitalText']!r}")
+                # 麦克风类提示不算失败：headless Chrome 没有麦克风设备/权限，
+                # 但打字通道完全可用（实测该提示与正确答案同时出现 → 链路本身正常）
+                raw_alert = conv["alert"]
+                mic_alert = ("麦克风" in raw_alert) or ("Permission denied" in raw_alert)
+                if raw_alert and mic_alert:
+                    print("  （麦克风提示属预期：headless 无麦克风设备，已单独判定，不计失败）")
+                elif raw_alert:
+                    failures.append(f"/console 出现链路错误提示：{raw_alert[:150]}")
+
+                # ---------- 5. 旧占位路由必须已下线 ----------
                 await cmd("Page.navigate", url=f"{BASE}/tools/mistakes")
                 time.sleep(2.0)
                 gone = await ev(
@@ -254,7 +296,7 @@ def main() -> int:
                     for f in failures:
                         print("   -", f)
                     return 1
-                print("✓ 全部通过（4 组断言）")
+                print("✓ 全部通过（5 组断言）")
                 return 0
 
         return asyncio.run(run())

@@ -141,20 +141,54 @@ bash backend/deploy/restore-cloud-lip.sh <SSH端口>
 
 ## 30 分钟演示脚本
 
+> 路由以 `frontend/src/App.tsx` 为准：**4 个产品页**（产品视角，主导航）+ **3 个工程视图**（验收证据链，收在侧栏二级分组，默认不外露）。
+> `2026-09-23` 那次重构已下线 `/tools/:key` 的 4 个占位页（错题集合 / 视频讲解 / 知识库 / 阶段目标）——它们没有后端数据源，能力由 `/insights`（真数据）承接。
+
 | 分钟 | 内容 | 看点 |
 |---|---|---|
-| 0–3 | 启动：后端 + 前端 + `restore-cloud-lip.sh` | `health` 里 `lip_service.reachable: true`、云端 `frames_cached: 536` |
-| 3–8 | 文字提问走通全链路 | 后台日志逐段打点：ASR / LLM / TTS / 口型 rtf |
-| 8–15 | 语音提问 + 打断 | 说话即打断（ADR-004 前端 VAD）；打断后 SSE 立即停止产出 |
-| 15–22 | **技术工作台**（`/studio`） | 实时延迟分解、口型片段、队列水位、`lip_dropped` |
-| 22–27 | **评估台账**（`/metrics`、`/ledger`） | 每行指标的「口径 + 环境 + 脚本」三要素 |
-| 27–30 | 打开 `docs/03-决策/` | 每个关键选择的被否方案与实测依据（ADR-005/006/010） |
+| 0–3 | 启动后端 + 前端 + `restore-cloud-lip.sh` | `health` 里 `lip_service.reachable: true`、云端 `frames_cached: 536` |
+| 3–8 | `/console` 文字提问走通全链路 | 气泡逐段出字；偶发提示只有两种：**「麦克风不可用」**（打字不受影响）或真正的「链路出了点问题」 |
+| 8–15 | `/console` 语音提问 + 打断 | 说话即打断（ADR-004 前端 VAD）；打断后 SSE 立即停止产出 |
+| 15–20 | `/` 学习目标 → `/insights` 学习洞察 | 统计**真算**：往 localStorage 塞已知记录，KPI 与话题聚类随之变化（`scripts/verify_frontend_pages.py` 就断言这点） |
+| 20–24 | `/library` 数字人资产 | 形象预览绑定真实产物（`/media/*`）；后端不可达时显示**降级态**，不假装在线 |
+| 24–28 | 工程视图 `/studio` `/metrics` `/ledger` | 实时延迟分解、口型片段、队列水位、`lip_dropped`；每行指标的「口径 + 环境 + 脚本」三要素 |
+| 28–30 | `docs/03-决策/` | 每个关键选择的被否方案与实测依据（ADR-005/006/010） |
+
+## 验证与自检
+
+三个入口，都是「真跑」而不是「能编译就行」：
+
+```bash
+# 1) 后端单测（76 项，含口型编码器真实内容回归）
+backend/.venv/Scripts/python.exe -m pytest backend/tests -q
+
+# 2) 文档体系校验（文档地图登记、命名、类型闭集；不通过 = FAIL）
+python scripts/validate_docs.py
+
+# 3) 前端页面验证（无头 Chrome 真开页面断言：统计真算 / 主题 token 生效 /
+#    降级态 / 旧占位路由已下线 / 对话页真实回答 —— 需后端在 8010 上跑着）
+#    先起前端（另开一个终端）：cd frontend && npm run dev   # http://127.0.0.1:5173
+VERIFY_BASE_URL=http://127.0.0.1:5173 backend/.venv/Scripts/python.exe scripts/verify_frontend_pages.py
+#    不设 VERIFY_BASE_URL 则默认打 4173（npm run preview）
+```
+
+> 上面第 1、2 条已在 `2026-09-28` 实测通过（`76 passed` / `PASS: 全部文档合规`）；
+> 第 3 条需要真实 LLM + TTS 凭据与前端 dev server，本机环境不具备时未跑——脚本自身的
+> 前置检查会先报「5173 未就绪」而不是给出误导性结论。
+
+> **测试为什么把临时目录放在仓库内**：口型编码器要把 MP4 落盘，因此依赖临时目录；
+> 而受限/沙箱化环境常拒绝随机后缀目录、云 GPU 的系统盘又很小。
+> `backend/tests/conftest.py` 把 `LIP_TMPDIR` 指到 `backend/.tmp-lip/`（已 gitignore、跑完自清），
+> 编码器本身也支持用 `LIP_TMPDIR` 覆盖、并优先复用其下固定工作目录——
+> 于是「测试能不能跑」不再取决于宿主机的 temp 权限。
 
 ## 目录结构
 
 ```
 backend/    FastAPI 后端（api / asr / brain / tts / lip / eval）+ deploy（云侧口型服务与运维脚本）
-frontend/   React 前端（学习首页 / 对话页 / 技术工作台 / 评估视图）
+frontend/   React 前端（产品视角 4 页：学习目标 / 对话辅导 / 学习洞察 / 数字人资产；
+                       工程视图 3 页：链路工作台 / 指标看板 / 评估台账）
+scripts/    文档校验（validate_docs.py）· 前端页面验证 · mermaid 图表校验
 docs/       全部文档（见下方文档地图）；文档规范见 docs/docs-guide.md
 ```
 
@@ -167,7 +201,7 @@ docs/       全部文档（见下方文档地图）；文档规范见 docs/docs-
 | 打断时序与状态机 | 方案 | 已定稿 | `docs/02-方案/DESIGN-打断时序与状态机转移表.md` |
 | 接口与协议规范 | 方案 | v1.10 | `docs/02-方案/SPEC-接口与协议规范.md` |
 | 决策记录（只增不改） | 决策 | 10 篇 | `docs/03-决策/ADR-*.md` |
-| 进度 | 进度 | 每阶段一份 | `docs/04-进度/PROGRESS-*.md` |
+| 进度 | 进度 | 每阶段一份 | `docs/04-进度/PROGRESS-*.md`（最新：`PROGRESS-2026-09-28-测试临时目录治理与演示口径对齐.md`） |
 | **评估台账（指标唯一入口）** | 台账 | 演进 | `docs/eval-history.md` |
 | 环境记录与踩坑 | 运维 | 演进 | `docs/RUNBOOK-环境记录.md` |
 | 文档总索引 | — | — | `docs/README.md` |

@@ -15,6 +15,10 @@ __pycache__/
 venv/
 .venv/
 
+# 测试/编码临时目录（conftest.py 把 LIP_TMPDIR 指到这里，跑完自清）
+.tmp-lip/
+.tmp-*/
+
 # Node
 node_modules/
 dist/

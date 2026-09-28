@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import json
 import os
 import sys
@@ -58,7 +59,17 @@ class Handler(BaseHTTPRequestHandler):
         import subprocess
         import tempfile
 
-        with tempfile.TemporaryDirectory(prefix="fakeseg_") as td:
+        # 与 deploy/lip_encode._tempdir 同一约定：LIP_TMPDIR 下若已有固定工作目录
+        # 就直接用（受限环境只放行固定路径），否则退回系统 temp 的随机目录。
+        root = os.environ.get("LIP_TMPDIR")
+        work = os.path.join(root, "fakesegwork") if root else ""
+        if work and os.path.isdir(work):
+            ctx = contextlib.nullcontext(work)
+        else:
+            ctx = tempfile.TemporaryDirectory(
+                prefix="fakeseg_", dir=root or None, ignore_cleanup_errors=True
+            )
+        with ctx as td:
             out = Path(td) / f"seg_{n_frames}.mp4"
             cmd = ["ffmpeg", "-y", "-v", "error", "-i", str(cls.canned_path),
                    "-frames:v", str(n_frames), "-c:v", "libx264", "-preset", "veryfast",

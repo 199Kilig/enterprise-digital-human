@@ -20,6 +20,9 @@ dependencies = [
 # 故纳入 pythonpath 以便本机直接单测编码路径（云 GPU 关机时也能验）
 pythonpath = ["src", "deploy"]
 testpaths = ["tests"]
+# 缓存写进 .tmp-lip/（已 gitignore，见 tests/conftest.py）：默认的 backend/.pytest_cache
+# 在受限环境下会被拒绝写入，每次跑测试都刷一片 PermissionError 警告
+cache_dir = ".tmp-lip/pytest-cache"
 
 [dependency-groups]
 dev = [

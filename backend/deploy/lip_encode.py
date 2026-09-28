@@ -9,6 +9,13 @@
    （moov 前置，浏览器拿到即可播）。
 2. `-v error` + stderr 单独管道：避免 ffmpeg 日志刷满缓冲区导致死锁
    （stdout 已重定向到文件，不会再和 stdin 争管道）。
+3. **临时目录可被 `LIP_TMPDIR` 覆盖，且优先用固定子目录**：MP4 产物要落盘，
+   所以这个模块对临时目录有真实依赖。三类环境都需要能改它：
+   本机受限/沙箱化运行时系统 temp 可能整块不可写；
+   云 GPU 的系统盘通常很小而数据盘挂在 `/root/autodl-tmp`；
+   受限环境常只放行**固定路径**、拒绝随机后缀目录。
+   于是 `LIP_TMPDIR` 存在时优先复用其下的固定子目录，否则退回系统 temp 的
+   `mkdtemp`（见 `_tempdir`）。
 """
 from __future__ import annotations
 
@@ -16,6 +23,7 @@ import itertools
 import os
 import subprocess
 import tempfile
+from contextlib import AbstractContextManager, nullcontext
 from typing import Iterable, Iterator
 
 import numpy as np
@@ -36,6 +44,35 @@ def _chain_first(first: np.ndarray, rest: Iterator[np.ndarray]) -> Iterator[np.n
 
 def _ffmpeg_bin() -> str:
     return os.environ.get("LIP_FFMPEG", "ffmpeg")
+
+
+def _tmpdir() -> str | None:
+    """临时目录根：`LIP_TMPDIR` 优先，未设/设成空串则回落到系统 temp。
+
+    每次调用都重读环境变量（而不是模块级常量）：测试与被调用方可在运行时改。
+    """
+    return os.environ.get("LIP_TMPDIR") or None
+
+
+def _tempdir(prefix: str) -> AbstractContextManager[str]:
+    """建临时目录，返回可 `with ... as path` 的上下文。
+
+    两级策略，为的是让**受限环境下也能跑**（本机沙箱化运行时真实遇到过）：
+      1. 若 `LIP_TMPDIR` 下已存在 `<prefix>work` 固定目录，直接用——受限环境常按
+         路径白名单放行**固定**路径，而随机后缀（mkdtemp）路径会被直接拒绝；
+         pytest 侧由 `backend/tests/conftest.py` 预先创建这类固定目录。
+      2. 否则退回 `mkdtemp`（正常开发/CI/云端的默认路径），并用
+         `ignore_cleanup_errors` 让清理阶段的 chmod/rmtree 失败不影响业务结果
+         ——清理是卫生问题，不该把一次成功的编码变成异常。
+    """
+    root = _tmpdir()
+    if root:
+        work = os.path.join(root, f"{prefix.rstrip('_')}work")
+        if os.path.isdir(work):
+            return nullcontext(work)
+    return tempfile.TemporaryDirectory(
+        prefix=prefix, dir=root, ignore_cleanup_errors=True
+    )
 
 
 def encode_frames_to_mp4(
@@ -75,7 +112,7 @@ def encode_frames_to_mp4(
     if faststart:
         cmd += ["-movflags", "+faststart"]
 
-    with tempfile.TemporaryDirectory(prefix="lipenc_") as td:
+    with _tempdir("lipenc_") as td:
         out_path = os.path.join(td, "out.mp4")
         cmd += [out_path]
         try:
@@ -118,7 +155,7 @@ def _tail(proc: subprocess.Popen) -> str:  # type: ignore[type-arg]
 
 def probe_mp4(data: bytes) -> dict:
     """用 ffprobe 读回编码结果的真实参数（验证用：证明产物真是 H.264 且帧数正确）。"""
-    with tempfile.TemporaryDirectory(prefix="lipprobe_") as td:
+    with _tempdir("lipprobe_") as td:
         p = os.path.join(td, "p.mp4")
         with open(p, "wb") as fh:
             fh.write(data)

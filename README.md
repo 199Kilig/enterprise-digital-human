@@ -156,7 +156,7 @@ bash backend/deploy/restore-cloud-lip.sh <SSH端口>
 
 ## 验证与自检
 
-三个入口，都是「真跑」而不是「能编译就行」：
+四个入口，都是「真跑」而不是「能编译就行」：
 
 ```bash
 # 1) 后端单测（76 项，含口型编码器真实内容回归）
@@ -170,11 +170,16 @@ python scripts/validate_docs.py
 #    先起前端（另开一个终端）：cd frontend && npm run dev   # http://127.0.0.1:5173
 VERIFY_BASE_URL=http://127.0.0.1:5173 backend/.venv/Scripts/python.exe scripts/verify_frontend_pages.py
 #    不设 VERIFY_BASE_URL 则默认打 4173（npm run preview）
+
+# 4) 前端样式一致性（CSS 里有没有已经没人用的孤儿类 / 幽灵选择器）
+#    只需前端 dev server，不需要后端与任何凭据
+backend/.venv/Scripts/python.exe scripts/verify_frontend_styles.py
+#    另可加 --no-browser 只做静态扫描（不起浏览器，秒级出结果）
 ```
 
-> 上面第 1、2 条已在 `2026-09-28` 实测通过（`76 passed` / `PASS: 全部文档合规`）；
-> 第 3 条需要真实 LLM + TTS 凭据与前端 dev server，本机环境不具备时未跑——脚本自身的
-> 前置检查会先报「5173 未就绪」而不是给出误导性结论。
+> 上面第 1、2、4 条已在 `2026-09-28` 实测通过（`76 passed` / `PASS: 全部文档合规` /
+> `PASS：无孤儿类，活跃样式生效`）；第 3 条需要真实 LLM + TTS 凭据与前端 dev server，
+> 本机环境不具备时未跑——脚本自身的前置检查会先报「5173 未就绪」而不是给出误导性结论。
 
 > **测试为什么把临时目录放在仓库内**：口型编码器要把 MP4 落盘，因此依赖临时目录；
 > 而受限/沙箱化环境常拒绝随机后缀目录、云 GPU 的系统盘又很小。

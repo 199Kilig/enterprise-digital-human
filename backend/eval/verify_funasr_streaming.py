@@ -25,7 +25,6 @@ import sys
 import time
 from pathlib import Path
 
-import numpy as np
 import soundfile as sf
 
 CHUNK_SIZE = [0, 10, 5]  # 600ms @16k

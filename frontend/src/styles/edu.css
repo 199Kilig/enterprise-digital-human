@@ -23,9 +23,9 @@
 
 /* 主要交互元素统一过渡与按下反馈（pressed 态：轻微下沉，避免"点了没反应"） */
 :where(
-    .edu-ghost, .edu-cta, .edu-start-btn, .edu-pro-btn, .edu-icon-btn, .edu-tool, .edu-task,
-    .edu-chat-mic-btn, .edu-chat-send, .edu-chat-stop, .edu-side-toggle, .edu-hist-item,
-    .navitem, .theme-toggle button
+    .edu-ghost, .edu-cta, .edu-start-btn, .edu-icon-btn,
+    .edu-chat-mic-btn, .edu-chat-send, .edu-chat-stop, .edu-side-toggle,
+    .edu-history a, .navitem, .theme-toggle button
   ) {
   transition:
     background-color var(--transition-fast),
@@ -269,91 +269,11 @@
   color: var(--text-tertiary);
 }
 
-.edu-tools {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--sp-2);
-}
-
-.edu-tool {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: var(--sp-2) 2px;
-  border-radius: var(--r-md);
-  text-decoration: none;
-  color: var(--text-secondary);
-  font-size: var(--fs-micro);
-  text-align: center;
-}
-
-.edu-tool:hover {
-  background: var(--bg-hover);
-  color: var(--brand-600);
-}
-
-.edu-tool-ico {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--r-md);
-  background: var(--warm-50);
-  border: 1px solid var(--warm-100);
-  color: var(--warm-600);
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.edu-tool.planned .edu-tool-ico {
-  background: var(--bg-inset);
-  border-color: var(--border);
-  color: var(--text-tertiary);
-}
-
 .edu-pro {
   border-radius: var(--r-lg);
   border: 1px solid var(--warm-100);
   background: var(--warm-50);
   padding: var(--sp-3);
-}
-
-.edu-pro-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-md);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.edu-pro-tag {
-  font-size: var(--fs-micro);
-  font-weight: 600;
-  padding: 0 6px;
-  border-radius: var(--r-pill);
-  border: 1px solid var(--warm-500);
-  color: var(--warm-600);
-}
-
-.edu-pro-sub {
-  margin-top: 2px;
-  font-size: var(--fs-sm);
-  color: var(--text-secondary);
-}
-
-.edu-pro-btn {
-  width: 100%;
-  margin-top: var(--sp-3);
-  padding: 8px;
-  border-radius: var(--r-md);
-  border: 1px solid var(--warm-500);
-  background: var(--bg-surface);
-  color: var(--warm-600);
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  cursor: not-allowed;
 }
 
 .edu-side-foot {
@@ -420,38 +340,6 @@
   align-items: center;
   gap: var(--sp-2);
   flex-wrap: wrap;
-}
-
-.edu-timer {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: 6px var(--sp-3);
-  border-radius: var(--r-pill);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  font-size: var(--fs-sm);
-  color: var(--text-secondary);
-}
-
-.edu-timer .edu-timer-value {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--fs-md);
-  color: var(--text-primary);
-}
-
-.edu-pomo {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px var(--sp-3);
-  border-radius: var(--r-pill);
-  background: var(--brand-50);
-  border: 1px solid var(--brand-100);
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-  color: var(--brand-600);
 }
 
 .edu-ghost {
@@ -533,10 +421,7 @@
   flex-direction: column;
 }
 
-/* 底部锚点：说明行/CTA 贴底，等高的卡片看起来是"填满的"而不是"上重下空" */
-.edu-card .edu-weekly-foot,
-.edu-card .edu-task-foot,
-.edu-card .edu-advice-basis,
+/* 底部锚点：CTA 贴底，等高的卡片看起来是"填满的"而不是"上重下空" */
 .edu-card--tasks .edu-start-btn {
   margin-top: auto;
 }
@@ -592,58 +477,6 @@
   flex: 1;
 }
 
-/* 卡片脚注里的跳转链接 */
-.edu-weekly-foot a {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.edu-weekly-foot a:hover {
-  text-decoration: underline;
-}
-
-/* ---- 本周学习目标 ---- */
-.edu-weekly {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-4);
-}
-
-.edu-fraction {
-  flex: none;
-  width: 78px;
-  height: 78px;
-}
-
-.edu-weekly-unit {
-  font-size: var(--fs-xl);
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.edu-mastery-row {
-  margin-top: 6px;
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: var(--fs-base);
-  color: var(--text-secondary);
-}
-
-.edu-mastery-row b {
-  font-size: var(--fs-2xl);
-  font-weight: 800;
-  color: var(--brand-500);
-}
-
-.edu-weekly-foot {
-  margin-top: var(--sp-3);
-  padding-top: var(--sp-3);
-  border-top: 1px dashed var(--border);
-  font-size: var(--fs-sm);
-  color: var(--text-tertiary);
-}
-
 /* ---- 本周进度（环形） ---- */
 .edu-ring {
   position: relative;
@@ -697,81 +530,6 @@
   color: var(--text-secondary);
 }
 
-/* ---- 今日学习任务 ---- */
-.edu-tasks {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
-.edu-task {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-md);
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  cursor: pointer;
-  text-align: left;
-  width: 100%;
-}
-
-.edu-task:hover {
-  border-color: var(--accent-border);
-}
-
-.edu-task-idx {
-  width: 22px;
-  height: 22px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  border-radius: var(--r-pill);
-  background: var(--brand-500);
-  color: var(--on-accent);
-  font-size: var(--fs-sm);
-  font-weight: 600;
-}
-
-.edu-task.done .edu-task-idx {
-  background: var(--brand-100);
-  color: var(--brand-600);
-}
-
-.edu-task-text {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--fs-base);
-  color: var(--text-primary);
-}
-
-.edu-task.done .edu-task-text {
-  color: var(--text-tertiary);
-  text-decoration: line-through;
-}
-
-.edu-task-check {
-  width: 18px;
-  height: 18px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  border-radius: var(--r-pill);
-  border: 1.5px solid var(--border-strong);
-  color: transparent;
-  font-size: 12px;
-}
-
-.edu-task.done .edu-task-check {
-  background: var(--brand-500);
-  border-color: var(--brand-500);
-  color: var(--on-accent);
-}
-
 .edu-start-btn {
   width: 100%;
   margin-top: var(--sp-4);
@@ -791,134 +549,6 @@
 
 .edu-start-btn:hover {
   background: var(--brand-600);
-}
-
-.edu-task-foot {
-  margin-top: var(--sp-3);
-  font-size: var(--fs-micro);
-  color: var(--text-tertiary);
-}
-
-/* ---- 待加强知识点 ---- */
-.edu-weak {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
-.edu-weak-item {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: 10px var(--sp-3);
-  border-radius: var(--r-md);
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-}
-
-.edu-weak-sym {
-  width: 26px;
-  height: 26px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  border-radius: var(--r-sm);
-  background: var(--brand-50);
-  border: 1px solid var(--brand-100);
-  color: var(--brand-500);
-  font-weight: 700;
-}
-
-.edu-weak-name {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--fs-base);
-  color: var(--text-primary);
-}
-
-.edu-weak-tag {
-  flex: none;
-  padding: 2px 8px;
-  border-radius: var(--r-pill);
-  background: var(--brand-50);
-  color: var(--brand-600);
-  font-size: var(--fs-micro);
-}
-
-/* ---- 阶段目标（折线） ---- */
-.edu-stage-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-1);
-  font-size: var(--fs-sm);
-  color: var(--text-secondary);
-}
-
-.edu-stage-head b {
-  font-size: var(--fs-xl);
-  font-weight: 700;
-  color: var(--brand-500);
-}
-
-.edu-stage-head .edu-stage-target b {
-  color: var(--text-primary);
-}
-
-.edu-stage-chart {
-  height: 196px;
-}
-
-/* ---- 智能建议 ---- */
-.edu-advice {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-4);
-}
-
-.edu-advice-figure {
-  flex: none;
-  width: 104px;
-  height: 128px;
-  border-radius: var(--r-md);
-  overflow: hidden;
-  background: var(--brand-50);
-  border: 1px solid var(--brand-100);
-}
-
-.edu-advice-figure img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: 50% 8%;
-}
-
-.edu-advice-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-lg);
-  font-weight: 700;
-  color: var(--brand-600);
-}
-
-.edu-advice-text {
-  margin-top: var(--sp-2);
-  padding: var(--sp-3) var(--sp-4);
-  border-radius: var(--r-md);
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  font-size: var(--fs-base);
-  color: var(--text-primary);
-}
-
-.edu-advice-basis {
-  margin-top: 6px;
-  font-size: var(--fs-micro);
-  color: var(--text-tertiary);
 }
 
 /* ---------------- 页头（/insights · /library 共用） ---------------- */
@@ -1444,10 +1074,6 @@
   }
   .edu-dash {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .edu-advice {
-    flex-direction: column;
-    align-items: flex-start;
   }
 }
 

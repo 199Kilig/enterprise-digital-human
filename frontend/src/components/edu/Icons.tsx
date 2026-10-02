@@ -1,8 +1,8 @@
 /**
  * 教育版图标集（内联 SVG，零图标库依赖）
  * ---------------------------------------------------------------------------
- * 为什么不用图标库：现有 package.json 只有 react/react-dom/react-router (+本轮 recharts)，
- * 为十几个图标引一个 300KB 的库不划算；统一 stroke=currentColor，跟随 token 换色。
+ * 为什么不用图标库：package.json 的运行时依赖只有 react / react-dom / react-router-dom
+ * 与 recharts，为十几个图标再引一个图标库不划算；统一 stroke=currentColor，跟随 token 换色。
  *
  * 注释只写「形态 + 语义」，不写具体页面/组件名：页面重构过一次，原先按使用位置写的注释
  * （如"错误集：错题集合（侧栏工具格）"）全部随之失效。功能下线的图标直接删，不留孤儿——

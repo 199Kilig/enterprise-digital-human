@@ -34,16 +34,6 @@ export interface SessionInfo {
   created_at: string
 }
 
-/** 延迟打点：一段链路的耗时（PRD FR-07） */
-export interface LatencySpan {
-  stage: string
-  label: string
-  ms: number | null
-  /** 目标值（DESIGN §5.1 延迟预算） */
-  targetMs: number | null
-  source: string
-}
-
 /** POST /api/v1/lip/infer 响应（SPEC §2.1，v1.2 起默认 transport=h264） */
 export interface LipInferResponse {
   transport?: 'h264' | 'frames'

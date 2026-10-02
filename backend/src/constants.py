@@ -12,11 +12,6 @@ BYTES_PER_SAMPLE = 2  # PCM 16bit 单声道
 BYTES_PER_MS = SAMPLE_RATE * BYTES_PER_SAMPLE // 1000  # 32 B/ms
 
 
-def ms_to_bytes(ms: float) -> int:
-    """毫秒 → PCM 字节数（16k/16bit 单声道）。"""
-    return int(ms * BYTES_PER_MS)
-
-
 def bytes_to_ms(n_bytes: float) -> int:
     """PCM 字节数 → 毫秒（时间戳换算用；取整误差 <1ms，句级游标由服务端时间戳校正）。"""
     return int(n_bytes / BYTES_PER_MS)

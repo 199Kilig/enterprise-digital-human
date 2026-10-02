@@ -8,8 +8,11 @@
   匹配过任何元素**，属于"看着有、实际没有"的幽灵规则。这类问题靠读代码很难发现。
 
 做法（三级证据，前两级不需要浏览器）：
-  1. 静态比对：CSS 里定义的 `.edu-*` 类 vs tsx/ts/html 里出现的类；
-     排除**动态拼接**前缀（`edu-badge--${state}` 这类不能用字面量判定）。
+  1. 静态比对：CSS 里定义的 `.edu-*` 类 vs tsx/ts/html 里出现的类。两侧判据都踩过坑：
+     ① 定义侧要先剥 `/* */` 注释——正则不看上下文，注释里写一句"`.edu-pro` 漏网"
+     就会被当成一个类定义，凭空多出孤儿；② 引用侧要**按词边界匹配**——子串匹配会让
+     `.edu-problem-list` 掩护掉 `.edu-pro`（2026-10-02 实测两者各漏/误报过一次）；
+     ③ 再排除**动态拼接**前缀（`edu-badge--${state}` 这类不能用字面量判定）。
   2. CSSOM 复核：起 headless Chrome，枚举 document.styleSheets 的 selectorText，
      区分「确实没有规则」与「有规则但当前页面没用上」。
   3. 生效性抽检：往 DOM 注入几个代表类，读 computed style——
@@ -70,7 +73,7 @@ PROBES: list[tuple[str, str, str, str, str, str]] = [
 ]
 DEFAULTISH = {"", "none", "normal", "auto", "transparent", "rgba(0, 0, 0, 0)"}
 # 清理过的死类（若又被人加回来，说明重构回退了）
-DEAD_SAMPLE = ["edu-pro-btn", "edu-tools", "edu-tool", "edu-timer", "edu-task",
+DEAD_SAMPLE = ["edu-pro", "edu-pro-btn", "edu-tools", "edu-tool", "edu-timer", "edu-task",
                "edu-weak", "edu-advice", "edu-hist-item"]
 
 
@@ -91,25 +94,42 @@ def dynamic_prefixes(blob: str) -> set[str]:
     return out
 
 
+def strip_comments(css: str) -> str:
+    """剥掉 `/* ... */` 注释，只从**规则体**里提取类名。
+
+    为什么必须剥：本脚本用正则从 CSS 全文抓 `.edu-*`，不看上下文，于是注释里
+    随手写一句"`.edu-pro` 漏网、被 `.edu-problem-*` 掩护"就会被当成两个类**定义**，
+    源码里当然找不到引用 → 凭空多出两个孤儿。2026-10-02 实测踩到。
+    （这也意味着：注释里的类名既可能造假阳性，也可能顺手"认领"一个真孤儿。）
+    """
+    return re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+
+
+def used_in_source(cls: str, blob: str) -> bool:
+    """类名在源码里是否被**完整**引用（词边界匹配，不是子串包含）。
+
+    为什么不能用 `cls in blob`：`.edu-pro`（「小奈 Pro」卡残留的规则块）会被
+    `.edu-problem-list` 的子串命中，从而永远被判成「活跃」——2026-10-02 实测该规则块
+    在源码里已零引用，脚本却报「0 孤儿」。类名的边界是「两侧都不是 `-` 或标识符字符」，
+    少了这个约束，任意一个长类名都能掩护它所有的短前缀类名。
+    """
+    return re.search(r"(?<![\w-])" + re.escape(cls) + r"(?![\w-])", blob) is not None
+
+
 def scan_orphans() -> tuple[list[str], list[str], set[str]]:
-    css = CSS_FILE.read_text(encoding="utf-8")
+    css = strip_comments(CSS_FILE.read_text(encoding="utf-8"))
     defined = sorted(set(re.findall(r"\.(edu-[a-z0-9-]+)", css)))
     blob = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in iter_code_files())
     dyn = dynamic_prefixes(blob)
 
     orphans = []
     for cls in defined:
-        if cls in blob:
+        if used_in_source(cls, blob):
             continue
         # 动态拼接的类不能靠字面量判定：前缀能对上就放过
         if any(cls.startswith(p) and p for p in dyn):
             continue
         orphans.append(cls)
-
-    ghost = []
-    for cls in defined:
-        if cls not in blob and not any(cls.startswith(p) and p for p in dyn):
-            ghost.append(cls)
     return defined, orphans, dyn
 
 

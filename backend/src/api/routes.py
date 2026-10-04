@@ -26,7 +26,7 @@ from brain.llm import BrainError, DeepSeekBrain
 from brain.persona import build_system_prompt
 from brain.segmenter import SentenceSplitter
 from brain.text_clean import clean_for_tts
-from config import load_config
+from config import REPO_ROOT, load_config
 from constants import BYTES_PER_MS, bytes_to_ms
 from lip import LipServiceError, build_lip_engine
 from schemas import SessionContext, SessionState
@@ -726,9 +726,10 @@ async def chat_stream(session_id: str, text: Optional[str] = None) -> StreamingR
 
 # ---- 只读数据端点：前端看板/台账的真数据源 ----
 # 设计原则：报告里没有的字段一律返回 null（status=pending），不编造数字。
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_REPORTS_DIR = _REPO_ROOT / "backend" / "eval" / "reports"
-_LEDGER_FILE = _REPO_ROOT / "docs" / "eval-history.md"
+# 仓库根路径统一由 config.REPO_ROOT 提供：此前这里另算了一遍 Path(__file__).parents[3]，
+# 与 config 里那个是同一事实的两份定义（值相同、含义相同，改一处忘一处就会错开）。
+_REPORTS_DIR = REPO_ROOT / "backend" / "eval" / "reports"
+_LEDGER_FILE = REPO_ROOT / "docs" / "eval-history.md"
 
 
 def _load_report(name: str) -> Optional[dict]:

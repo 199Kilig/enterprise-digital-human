@@ -1,20 +1,27 @@
 """前端重构后的页面验证（真跑，不是"能编译就行"）。
 
-验三件事：
+验 5 组断言（编号见脚本内注释）：
   1. `/insights` 的统计是**真算出来的** —— 往 localStorage 塞已知的对话记录，
      reload 后断言页面显示的数字与塞入数据一致（若显示的是写死的假数字，会失败）。
   2. 浅色 / 深色下 `--shadow-brand` 与 `--halo-brand` 的 computed 值**不同**
      （P4 把硬编码 rgba 提成 token，深色块的覆盖必须真的生效）。
-  3. `/library` 能渲染，且在后端不可达时显示**降级态**（不假装在线）。
+  3. `/library` 能渲染：后端在线时报真实服务状态，不可达时显示**降级态**（不假装在线）。
+  4. `/console` 走通真实 SSE 链路：能发问、能收到数字人回答文本、且不出现链路错误提示。
+  5. `/tools/:key` 旧占位路由已下线（访问应重定向回首页）。
 
 用法：
   1) 起前端：`npm run dev`（5173，推荐 —— localStorage 与真实使用一致）
      或 `npm run preview -- --port 4173`
-  2) 跑：
+  2) **同时起后端**（第 3、4 组断言要真链路）：
+     cd backend && set PYTHONPATH=src && .venv\\Scripts\\python.exe -m uvicorn api.routes:app --port 8010
+  3) 跑：
      VERIFY_BASE_URL=http://127.0.0.1:5173 backend/.venv/Scripts/python.exe scripts/verify_frontend_pages.py
 
 ⚠️ 必须用 `backend/.venv` 的 python —— 脚本依赖 `websockets`（Hermes 自带解释器没有）。
    默认 BASE 为 4173；用 VERIFY_BASE_URL 指到 dev server 或其它端口。
+⚠️ 第 4 组需要**有效的 DEEPSEEK_API_KEY**（backend/.env）：key 失效时链路以
+   `LLM_ERROR: HTTP 401` 结束，第 4 组会报失败——那是凭证问题、不是前端回归，
+   换 key 后重跑即可（2026-10-04 实测踩到）。
 """
 
 import json
@@ -24,14 +31,24 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.request
 import urllib.parse
 
+try:  # 中文 Windows 控制台默认 GBK，而本脚本输出含 ✓/✗ ——没有这层兜底时，
+    # 连"报错信息"本身都会抛 UnicodeEncodeError，真正的失败原因反而被盖住
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):
+    pass
+
 BASE = os.environ.get("VERIFY_BASE_URL", "http://127.0.0.1:4173")
 BASE_PORT = int(BASE.rstrip("/").rsplit(":", 1)[-1])
 CDP_PORT = 9444
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# 临时目录放项目内：受限环境（沙箱/受控主机）常拒绝系统 temp 的随机路径写入，
+# 同时系统盘可能很小——与 verify_frontend_styles.py、backend/tests/conftest.py 的约定一致。
+SCRATCH = os.path.join(ROOT, ".tmp-verify", "frontend-pages")
 
 
 def find_chrome() -> str:
@@ -65,8 +82,10 @@ def main() -> int:
         return 2
 
     chrome = find_chrome()
-    profile = os.path.join(tempfile.gettempdir(), "chrome-verify-pages")
+    os.makedirs(SCRATCH, exist_ok=True)
+    profile = os.path.join(SCRATCH, "chrome-profile")
     shutil.rmtree(profile, ignore_errors=True)
+    errlog = open(os.path.join(SCRATCH, "chrome.err"), "wb")
     proc = subprocess.Popen(
         [
             chrome,
@@ -77,10 +96,20 @@ def main() -> int:
             "--no-default-browser-check",
             "--disable-gpu",
             "--window-size=1440,1000",
+            # 受限环境（沙箱/受控主机）：Chrome 会去连更新服务或已存在的实例，
+            # 命名管道被拒时进程直接短命 -> CDP 永远不就绪（verify_frontend_styles.py 踩过同一个坑）
+            "--disable-background-networking",
+            "--disable-component-update",
+            "--disable-sync",
+            "--disable-default-apps",
+            "--disable-extensions",
+            "--no-service-autorun",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
             "about:blank",
         ],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=errlog,
     )
     try:
         import asyncio
@@ -301,6 +330,7 @@ def main() -> int:
 
         return asyncio.run(run())
     finally:
+        errlog.close()
         proc.terminate()
         try:
             proc.wait(timeout=5)

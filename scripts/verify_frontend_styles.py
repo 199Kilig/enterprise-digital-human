@@ -6,19 +6,30 @@
   规则块留了下来。后果不只是体积：`edu.css` 的 `:where(...)` 点击反馈列表里
   还留着 `.edu-hist-item`——而侧栏用的类名是 `.edu-history`，那个选择器**从未
   匹配过任何元素**，属于"看着有、实际没有"的幽灵规则（2026-10-01 修为
-  `.edu-history a`）。这类问题靠读代码很难发现：同一个脚本自己也曾漏报过
-  `.edu-pro`（见下方判据①），直到 2026-10-02 才被抓出来。
+  `.edu-history a`）。同一批残留后来又在 `app.css` 找到一整套（旧控制台骨架
+  `.shell` / `.topbar` / `.sidenav` / `.body` / `.content`，2026-10-04 清掉）。
+  这类问题靠读代码很难发现：脚本自己就漏报过 `.edu-pro`（见下方判据①②）。
 
 做法（三级证据，前两级不需要浏览器）：
-  1. 静态比对：CSS 里定义的 `.edu-*` 类 vs tsx/ts/html 里出现的类。两侧判据都踩过坑：
-     ① 定义侧要先剥 `/* */` 注释——正则不看上下文，注释里写一句"`.edu-pro` 漏网"
-     就会被当成一个类定义，凭空多出孤儿；② 引用侧要**按词边界匹配**——子串匹配会让
-     `.edu-problem-list` 掩护掉 `.edu-pro`（2026-10-02 实测两者各漏/误报过一次）；
+  1. 静态比对：样式表里定义的类 vs tsx/ts/html 里出现的类。两侧判据都踩过坑：
+     ① 定义侧要先剥 `/* */` 注释，且**只从选择器位置取类名**——正则扫全文时，
+     注释里写一句"`.edu-pro` 漏网"会被当成类定义，`url(sprite.png)` 会多出 `.png`；
+     ② 引用侧要**按词边界匹配**——子串匹配会让 `.edu-problem-list` 掩护掉 `.edu-pro`
+     （2026-10-02 实测①②各误报/漏报过一次）；
      ③ 再排除**动态拼接**前缀（`edu-badge--${state}` 这类不能用字面量判定）。
   2. CSSOM 复核：起 headless Chrome，枚举 document.styleSheets 的 selectorText，
      区分「确实没有规则」与「有规则但当前页面没用上」。
   3. 生效性抽检：往 DOM 注入几个代表类，读 computed style——
      活跃类必须拿到非默认样式（证明样式真的在起作用，而不是靠继承巧合）。
+
+判据的已知边界（静态比对是"宁可漏报，不可误删"）：
+  · 引用侧按全源码文本匹配，于是 `document.body` / `<footer>` / `Content-Type`
+    会让 `.body` / `.footer` / `.content` 这类通用名永远算「在用」——app.css 里
+    这 3 个是人工核对（className 字面量判据 + 逐个 grep）才敢删的；
+  · 反过来，``className={`msg ${m.role}`}`` 这种变量传递是**真引用**，脚本判它在用
+    是对的（`.system` / `.over` 即此类，别按字面量判据误删）。
+
+扫描范围：`app.css` 与 `edu.css`（tokens.css 只定义变量、不定义类）。
 
 用法：
     1) 起前端：cd frontend && npm run dev
@@ -49,7 +60,14 @@ except (AttributeError, ValueError):
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONT = ROOT / "frontend" / "src"
-CSS_FILE = FRONT / "styles" / "edu.css"
+# 扫描目标：(样式文件, 类名前缀 or None)
+#   edu.css 统一 .edu-* 命名，比对时可以只看这个前缀；
+#   app.css 是旧控制台命名（.panel /.btn /.table ...），无统一前缀，只能全量比对。
+#   tokens.css 只定义变量、不定义类，不在扫描范围。
+STYLESHEETS: list[tuple[Path, str | None]] = [
+    (FRONT / "styles" / "edu.css", "edu-"),
+    (FRONT / "styles" / "app.css", None),
+]
 # 临时目录放项目内：受限环境（沙箱/受控主机）常拒绝系统 temp 的随机路径写入，
 # 同时系统盘可能很小——与 backend/tests/conftest.py 的 LIP_TMPDIR 约定一致。
 SCRATCH = ROOT / ".tmp-verify" / "frontend-styles"
@@ -74,9 +92,15 @@ PROBES: list[tuple[str, str, str, str, str, str]] = [
     ("edu-library-grid", "div", "display", "", "nonzero", ""),
 ]
 DEFAULTISH = {"", "none", "normal", "auto", "transparent", "rgba(0, 0, 0, 0)"}
-# 清理过的死类（若又被人加回来，说明重构回退了）
-DEAD_SAMPLE = ["edu-pro", "edu-pro-btn", "edu-tools", "edu-tool", "edu-timer", "edu-task",
-               "edu-weak", "edu-advice", "edu-hist-item"]
+# 查过的死类（若又被人加回来，说明重构回退了）。浏览器级复核按 CSSOM 精确查它们。
+DEAD_SAMPLE = [
+    # edu.css：2026-10-01 清下线功能的规则块 + 2026-10-02 补删 .edu-pro
+    "edu-pro", "edu-pro-btn", "edu-tools", "edu-tool", "edu-timer", "edu-task",
+    "edu-weak", "edu-advice", "edu-hist-item",
+    # app.css：2026-10-04 清旧控制台骨架（.shell/.topbar/.sidenav/.body/.content 一套）
+    "shell", "topbar", "brand", "sub", "sidenav", "group-label", "idx",
+    "overlay-bottom", "tight", "sm", "body", "content", "footer",
+]
 
 
 def iter_code_files() -> list[Path]:
@@ -118,11 +142,38 @@ def used_in_source(cls: str, blob: str) -> bool:
     return re.search(r"(?<![\w-])" + re.escape(cls) + r"(?![\w-])", blob) is not None
 
 
-def scan_orphans() -> tuple[list[str], list[str], set[str]]:
-    css = strip_comments(CSS_FILE.read_text(encoding="utf-8"))
-    defined = sorted(set(re.findall(r"\.(edu-[a-z0-9-]+)", css)))
-    blob = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in iter_code_files())
-    dyn = dynamic_prefixes(blob)
+def defined_classes(css: str) -> set[str]:
+    """只从**选择器位置**提取类名（每个 `{` 之前那一段），不扫声明体。
+
+    为什么不用一句正则扫全文：声明体里同样会出现 `.` + 词，例如
+    `background: url(sprite.png)` 会凭空多出一个 `.png` 类、`content: ".foo"`
+    会多出 `.foo`——两者都会变成假孤儿。`{}`/`;` 即选择器与声明体的边界。
+    """
+    out: set[str] = set()
+    pending: list[str] = []
+    for ch in css:
+        if ch == "{":
+            out.update(re.findall(r"\.([a-zA-Z][\w-]*)", "".join(pending)))
+            pending.clear()
+        elif ch in "};":
+            pending.clear()
+        else:
+            pending.append(ch)
+    return out
+
+
+def code_blob() -> str:
+    return "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in iter_code_files())
+
+
+def scan_orphans(css_file: Path, prefix: str | None, blob: str,
+                 dyn: set[str]) -> tuple[list[str], list[str]]:
+    """扫单个样式文件，返回（该文件定义的类, 其中的孤儿类）。
+
+    prefix 限定类名前缀（edu.css 只看 .edu-*），None 表示全量（app.css）。
+    """
+    css = strip_comments(css_file.read_text(encoding="utf-8"))
+    defined = sorted(c for c in defined_classes(css) if prefix is None or c.startswith(prefix))
 
     orphans = []
     for cls in defined:
@@ -132,7 +183,7 @@ def scan_orphans() -> tuple[list[str], list[str], set[str]]:
         if any(cls.startswith(p) and p for p in dyn):
             continue
         orphans.append(cls)
-    return defined, orphans, dyn
+    return defined, orphans
 
 
 def find_chrome() -> str:
@@ -294,21 +345,27 @@ def main() -> int:
     ap.add_argument("--no-browser", action="store_true", help="只做静态扫描，不起浏览器")
     args = ap.parse_args()
 
-    if not CSS_FILE.exists():
-        print(f"FAIL: 找不到 {CSS_FILE}")
+    missing = [str(f) for f, _ in STYLESHEETS if not f.exists()]
+    if missing:
+        print(f"FAIL: 找不到 {missing}")
         return 2
     SCRATCH.mkdir(parents=True, exist_ok=True)
 
-    defined, orphans, dyn = scan_orphans()
-    print(f"edu.css 定义 .edu-* 类：{len(defined)} 个")
+    blob = code_blob()
+    dyn = dynamic_prefixes(blob)
     print(f"动态拼接前缀（不参与孤儿判定）：{sorted(dyn) or '无'}")
-    print(f"孤儿类（源码里完全没引用）：{len(orphans)} 个")
-    for c in orphans:
-        print(f"  - .{c}")
 
     fails: list[str] = []
-    if orphans:
-        fails.append(f"{len(orphans)} 个孤儿类：{orphans[:12]}{' ...' if len(orphans) > 12 else ''}")
+    for css_file, prefix in STYLESHEETS:
+        defined, orphans = scan_orphans(css_file, prefix, blob, dyn)
+        scope = f".{prefix}* 类" if prefix else "类"
+        print(f"\n{css_file.name} 定义 {scope}：{len(defined)} 个")
+        print(f"  孤儿类（源码里完全没引用）：{len(orphans)} 个")
+        for c in orphans:
+            print(f"    - .{c}")
+        if orphans:
+            fails.append(f"{css_file.name}: {len(orphans)} 个孤儿类 "
+                         f"{orphans[:12]}{' ...' if len(orphans) > 12 else ''}")
 
     if not args.no_browser:
         print("\n浏览器级复核：")
@@ -322,7 +379,7 @@ def main() -> int:
         for f in fails:
             print("  -", f)
         return 1
-    print("PASS：无孤儿类，活跃样式生效")
+    print(f"PASS：{len(STYLESHEETS)} 个样式表均无孤儿类，活跃样式生效")
     return 0
 
 

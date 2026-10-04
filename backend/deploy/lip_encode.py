@@ -181,6 +181,3 @@ def probe_mp4(data: bytes) -> dict:
             "pix_fmt": s.get("pix_fmt"),
         }
 
-
-def frames_from_iter(it: Iterable[np.ndarray]) -> list[np.ndarray]:
-    return list(it)

@@ -37,41 +37,7 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------------- 应用骨架 ---------------- */
-.shell {
-  display: grid;
-  grid-template-rows: 48px 1fr;
-  height: 100%;
-}
-
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-4);
-  padding: 0 var(--sp-4);
-  background: var(--bg-surface);
-  border-bottom: 1px solid var(--border);
-}
-
-.topbar .brand {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2);
-  font-size: var(--fs-md);
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
-.topbar .brand .sub {
-  font-size: var(--fs-sm);
-  font-weight: 400;
-  color: var(--text-tertiary);
-}
-
-.topbar .grow {
-  flex: 1;
-}
-
+/* ---------------- 顶部元信息 ---------------- */
 .topbar-meta {
   display: flex;
   align-items: center;
@@ -86,29 +52,7 @@ button {
   gap: var(--sp-1);
 }
 
-.body {
-  display: grid;
-  grid-template-columns: 208px 1fr;
-  min-height: 0;
-}
-
-.sidenav {
-  background: var(--bg-surface);
-  border-right: 1px solid var(--border);
-  padding: var(--sp-3) var(--sp-2);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-}
-
-.sidenav .group-label {
-  padding: var(--sp-3) var(--sp-3) var(--sp-1);
-  font-size: var(--fs-micro);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-tertiary);
-}
-
+/* ---------------- 导航项 ---------------- */
 .navitem {
   display: flex;
   align-items: center;
@@ -129,27 +73,6 @@ button {
   background: var(--accent-dim);
   border-color: var(--accent-border);
   color: var(--text-primary);
-}
-
-.navitem .idx {
-  font-family: var(--font-mono);
-  font-size: var(--fs-micro);
-  color: var(--text-tertiary);
-}
-
-.sidenav .footer {
-  margin-top: auto;
-  padding: var(--sp-3);
-  font-size: var(--fs-micro);
-  color: var(--text-tertiary);
-  border-top: 1px solid var(--border);
-  line-height: 1.5;
-}
-
-.content {
-  min-height: 0;
-  overflow: auto;
-  padding: var(--sp-4);
 }
 
 /* ---------------- 通用容器 ---------------- */
@@ -233,10 +156,6 @@ button {
 
 .panel-body {
   padding: var(--sp-4);
-}
-
-.panel-body.tight {
-  padding: var(--sp-3);
 }
 
 .grid-2 {
@@ -481,22 +400,6 @@ button {
   align-items: center;
 }
 
-.stage .overlay-bottom {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--overlay-bg);
-  border-top: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-1) var(--sp-3);
-  font-size: var(--fs-micro);
-  color: var(--overlay-text);
-}
-
 .stage-actions {
   display: flex;
   gap: var(--sp-2);
@@ -532,11 +435,6 @@ button {
 .btn.danger {
   border-color: var(--fail-border);
   color: var(--fail);
-}
-
-.btn.sm {
-  padding: 3px var(--sp-2);
-  font-size: var(--fs-sm);
 }
 
 /* 麦克风按钮 + 电平表（语音输入，ADR-004 前端采集） */

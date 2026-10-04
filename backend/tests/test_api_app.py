@@ -71,3 +71,33 @@ def test_lip_service_url_must_not_use_localhost() -> None:
         f"service_url 含 localhost（{url}）：本机解析耗时约 2 秒/次，"
         "会直接叠加到音画偏差上，请改用 127.0.0.1"
     )
+
+
+def test_readonly_data_endpoints_resolve_real_paths() -> None:
+    """只读数据端点（指标看板 / 评估台账）真的能从仓库里读到数据。
+
+    为什么需要：`/api/v1/metrics` 与 `/api/v1/eval/ledger` 是前端 `/metrics`、
+    `/ledger` 两页的唯一数据源，而它们的目录由**仓库根路径**推导而来（2026-10-04 起
+    统一走 config.REPO_ROOT，此前 routes.py 自己另算了一遍 `parents[3]`，同一事实两份定义）。
+    路径推错一层不会抛异常，只会表现成"看板全空 / 台账 0 行"，与"本来就没数据"肉眼无法区分——
+    所以这里直接拿仓库里真实存在的报告与台账来断言，而不是只断言状态码 200。
+    """
+    from fastapi.testclient import TestClient
+
+    mod = importlib.import_module("api.routes")
+    # 先钉住根：层数推错的典型症状是指到仓库外
+    assert mod.REPO_ROOT == mod._REPORTS_DIR.parents[2], mod._REPORTS_DIR
+    assert mod._REPORTS_DIR.is_dir(), f"报告目录不存在：{mod._REPORTS_DIR}"
+    assert mod._LEDGER_FILE.is_file(), f"台账文件不存在：{mod._LEDGER_FILE}"
+
+    client = TestClient(mod.app)
+    r = client.get("/api/v1/metrics")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["reports_found"], "一份报告都没找到——REPORTS_DIR 可能推错了"
+    assert body["rows"], "指标行为空——REPORTS_DIR 可能推错了"
+
+    r2 = client.get("/api/v1/eval/ledger")
+    assert r2.status_code == 200, r2.text
+    body2 = r2.json()
+    assert body2["rows"], "台账 0 行——LEDGER_FILE 可能推错了"
